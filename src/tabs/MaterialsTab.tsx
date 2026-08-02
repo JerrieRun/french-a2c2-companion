@@ -11,14 +11,11 @@ type ParseMode = 'auto' | 'deepseek' | 'local';
 type MaterialsTabProps = {
   // 教材与解析状态
   pdfName: string | null;
-  pdfText: string;
   error: string | null;
   loading: boolean;
   parseMethod: string;
   parseMode: ParseMode;
   setParseMode: (mode: ParseMode) => void;
-  showFullText: boolean;
-  setShowFullText: (updater: (prev: boolean) => boolean) => void;
   materialPreview: MaterialPreview | null;
   selectedUnit: UnitSection | null;
   selectedUnitIndex: number;
@@ -82,8 +79,8 @@ type MaterialsTabProps = {
 
 export function MaterialsTab(props: MaterialsTabProps) {
   const {
-    pdfName, pdfText, error, loading, parseMethod, parseMode, setParseMode,
-    showFullText, setShowFullText, materialPreview, selectedUnit, selectedUnitIndex,
+    pdfName, error, loading, parseMethod, parseMode, setParseMode,
+    materialPreview, selectedUnit, selectedUnitIndex,
     displayedSentences, sentenceCount, selectedSentence, selectedSentenceIndex,
     candidateWords, wordBook, deepSeekStudyPlan, deepSeekModeLabel,
     analysisResult, analysisPrompt, practiceExercises, practicePrompt,
@@ -311,34 +308,6 @@ export function MaterialsTab(props: MaterialsTabProps) {
       {loading && <p className="mt-4 text-sm text-slate-600">正在提取，请稍候...</p>}
     </div>
 
-    <div className="rounded-[28px] bg-white p-6 shadow-sm">
-      <h3 className="text-xl font-semibold text-slate-900">教材预览</h3>
-      <p className="mt-2 text-sm text-slate-600">提取后可直接查看文本段落，后续会追加逐句朗读和语法分析。</p>
-      <div className="mt-4 rounded-3xl bg-cream p-4 text-sm text-slate-700">
-        <p className="font-medium text-slate-900">摘要</p>
-        <p className="mt-2 leading-7">{materialPreview?.excerpt || '目前尚未上传教材。'}</p>
-      </div>
-      <div className="mt-4 rounded-3xl bg-slate-50 p-4 text-sm text-slate-700">
-        <p className="font-medium text-slate-900">当前解析方法</p>
-        <p className="mt-2 leading-7">{parseMethod}</p>
-      </div>
-      {pdfText && (
-        <div className="mt-4">
-          <button
-            type="button"
-            onClick={() => setShowFullText(prev => !prev)}
-            className="rounded-2xl bg-lavender px-4 py-2 text-sm font-semibold text-slate-900"
-          >
-            {showFullText ? '收起全文预览' : '展开全文预览'}
-          </button>
-          {showFullText && (
-            <div className="mt-4 max-h-64 overflow-auto rounded-3xl border border-slate-200 bg-white p-4 text-xs leading-6 text-slate-700">
-              <pre className="whitespace-pre-wrap">{pdfText}</pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
   </div>
 
   {materialPreview && (

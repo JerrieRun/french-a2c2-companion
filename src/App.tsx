@@ -15,7 +15,6 @@ import { UnitVocabularyCard } from './components/UnitVocabularyCard';
 function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('materials');
   const [pdfName, setPdfName] = useState<string | null>(null);
-  const [pdfText, setPdfText] = useState<string>('');
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [pdfPages, setPdfPages] = useState<string[]>([]);
   const [pdfTargetPage, setPdfTargetPage] = useState<number | null>(null);
@@ -59,7 +58,6 @@ function App() {
   const [deepSeekConfigOpen, setDeepSeekConfigOpen] = useState(false);
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>([]);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
-  const [showFullText, setShowFullText] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -132,14 +130,12 @@ function App() {
 
     setPdfName(file.name);
     setError(null);
-    setPdfText('正在提取文本...');
     setMaterialPreview(null);
     setLoading(true);
 
     const isPdfFile = file.type.toLowerCase().includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
     if (!isPdfFile) {
       setError('当前仅支持 PDF 文件上传。');
-      setPdfText('');
       setLoading(false);
       return;
     }
@@ -153,7 +149,6 @@ function App() {
       const candidates = extractWordCandidates(fullText);
       setPdfDoc(pdfDoc);
       setPdfPages(pages);
-      setPdfText(fullText || '无法识别 PDF 内容，请尝试其他文件。');
       setMaterialPreview({ ...preview, units: unitsWithPages });
       setSelectedUnitIndex(0);
       setPdfTargetPage(unitsWithPages[0]?.startPage ?? null);
@@ -163,7 +158,6 @@ function App() {
       console.error('PDF 提取失败：', e);
       const message = e instanceof Error ? e.message : String(e);
       setError(`PDF 文本提取失败，请稍后再试。${message ? ` 错误：${message}` : ''}`);
-      setPdfText('');
     } finally {
       setLoading(false);
     }
@@ -187,10 +181,11 @@ function App() {
   };
 
   /** 根据每页文本，把单元映射到对应 PDF 页码（用于预览框自动跳页）。
-   *  原理：重建与 buildLocalUnitsFromText 完全一致的归一化全文，
-   *  用单元首句在全文中的位置反推页码，避免跨页/换行导致匹配失败。 */
+   *  策略：① 单元前 3 句全文精确匹配（本地解析的逐字文本可跨页命中）；
+   *        ② 失败时按标题定位：跳过目录/索引页（含 ≥2 个单元标题的页（目录/索引页）），
+   *           取标题首次出现在正文单元页的位置（兼容 DeepSeek 改写的句子）。 */
   const mapUnitsToPages = (units: UnitSection[], pages: string[]): UnitSection[] => {
-    const normPages = pages.map(page => page.replace(/\s+/g, ' ').trim());
+    const normPages = pages.map(page => page.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[’‘]/g, "'"));
     const normStarts: number[] = [];
     const pieces: string[] = [];
     let pos = 0;
@@ -214,17 +209,60 @@ function App() {
       return page;
     };
 
+    // 标题 → 出现页列表；含 ≥3 个不同标题的页视为目录/索引页（页号存负数标记）
+    const titleKeys = Array.from(new Set(
+      units.map(u => (u.title || '').replace(/\s+/g, ' ').trim().toLowerCase().replace(/[’‘]/g, "'")).filter(Boolean)
+    ));
+    const titlePages = new Map<string, number[]>();
+    normPages.forEach((pageText, index) => {
+      const present: string[] = [];
+      for (const key of titleKeys) {
+        if (pageText.includes(key)) {
+          present.push(key);
+          const list = titlePages.get(key) || [];
+          list.push(index + 1);
+          titlePages.set(key, list);
+        }
+      }
+      if (present.length >= 2) {
+        for (const key of present) {
+          const list = titlePages.get(key)!;
+          list[list.length - 1] = -Math.abs(list[list.length - 1]);
+        }
+      }
+    });
+
     let searchFrom = 0;
     let prevStartPage = 1;
     return units.map(unit => {
-      const key = (unit.sentences[0] || unit.excerpt || unit.title).replace(/\s+/g, ' ').trim();
-      const idx = key ? normFull.indexOf(key, searchFrom) : -1;
-      const startPage = idx >= 0 ? pageForOffset(idx) : prevStartPage;
-      searchFrom = idx >= 0 ? idx + 1 : searchFrom;
-      prevStartPage = startPage;
-      return { ...unit, startPage, endPage: startPage };
+      // ① 精确匹配：只用句子，避免标题命中目录/封面造成误跳
+      let startPage = -1;
+      for (const sentence of unit.sentences.slice(0, 3)) {
+        const key = sentence.replace(/\s+/g, ' ').trim();
+        if (key.length < 8) continue;
+        const idx = normFull.indexOf(key, searchFrom);
+        if (idx >= 0) {
+          startPage = pageForOffset(idx);
+          searchFrom = idx + 1;
+          break;
+        }
+      }
+
+      // ② 标题定位：取首次出现在非目录页的标题
+      if (startPage < 0 && unit.title) {
+        const key = unit.title.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[’‘]/g, "'");
+        const pagesList = titlePages.get(key) || [];
+        const firstReal = pagesList.find(pg => pg > 0);
+        if (firstReal && firstReal > 0) startPage = firstReal;
+      }
+
+      const finalPage = startPage > 0 ? startPage : prevStartPage;
+      prevStartPage = finalPage;
+      return { ...unit, startPage: finalPage, endPage: finalPage };
     });
   };
+
+
 
   const buildMaterialPreview = (text: string): MaterialPreview => {
     const normalized = text.replace(/\s+/g, ' ').trim();
@@ -916,14 +954,11 @@ function App() {
 {activeTab === 'materials' && (
     <MaterialsTab
       pdfName={ pdfName }
-      pdfText={ pdfText }
       error={ error }
       loading={ loading }
       parseMethod={ parseMethod }
       parseMode={ parseMode }
       setParseMode={ setParseMode }
-      showFullText={ showFullText }
-      setShowFullText={ setShowFullText }
       materialPreview={ materialPreview }
       selectedUnit={ selectedUnit }
       selectedUnitIndex={ selectedUnitIndex }
