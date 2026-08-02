@@ -50,16 +50,17 @@ function PdfPage({
       const page = await pdfDoc.getPage(pageNumber);
       const viewport = page.getViewport({ scale });
       if (cancelled) return;
-      setSize({ w: viewport.width, h: viewport.height });
 
+      // canvas 无条件渲染，ref 恒存在；先设尺寸再 setSize，避免条件渲染导致 ref 为空
       const canvas = canvasRef.current;
       const layer = layerRef.current;
       if (!canvas || !layer) return;
       canvas.width = viewport.width;
       canvas.height = viewport.height;
+      setSize({ w: viewport.width, h: viewport.height });
+
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
-
       renderTask = page.render({ canvasContext: ctx, viewport });
       await renderTask.promise;
       if (cancelled) return;
@@ -93,7 +94,7 @@ function PdfPage({
       className="relative mx-auto mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
       data-page={pageNumber}
     >
-      {size && <canvas ref={canvasRef} style={{ width: size.w, height: size.h }} />}
+      <canvas ref={canvasRef} className={size ? '' : 'invisible'} style={size ? { width: size.w, height: size.h } : undefined} />
       <div
         ref={layerRef}
         className="pdf-text-layer"
@@ -132,23 +133,44 @@ export function PdfViewer(props: PdfViewerProps) {
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, [pdfDoc, targetPage, jumpSignal]);
 
+  // 计算工具条位置
+  const positionFromRange = (range: Range, containerRect: DOMRect) => {
+    const rect = range.getBoundingClientRect();
+    return {
+      x: Math.min(Math.max(rect.left - containerRect.left, 8), containerRect.width - 280),
+      y: Math.max(rect.top - containerRect.top - 56, 8),
+    };
+  };
+
+  const syncSelection = () => {
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().replace(/\s+/g, ' ').trim() : '';
+    const container = containerRef.current;
+    if (!sel || !container) {
+      setSelection(null);
+      return;
+    }
+    if (!sel.rangeCount || sel.isCollapsed || !text) {
+      const range = sel.rangeCount ? sel.getRangeAt(0) : null;
+      const insidePdf = range && container.contains(range.commonAncestorContainer);
+      if (!insidePdf || !range || range.collapsed) setSelection(null);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    // 只处理 PDF 文字层内的选区
+    if (!container.contains(range.commonAncestorContainer)) return;
+    const containerRect = container.getBoundingClientRect();
+    setSelection({ text, ...positionFromRange(range, containerRect) });
+  };
+
+  // 选区变化即显示工具条（兼容键盘/程序化选区），鼠标松开时再校正位置
+  useEffect(() => {
+    document.addEventListener('selectionchange', syncSelection);
+    return () => document.removeEventListener('selectionchange', syncSelection);
+  }, []);
+
   const handleMouseUp = () => {
-    window.setTimeout(() => {
-      const sel = window.getSelection();
-      const text = sel ? sel.toString().replace(/\s+/g, ' ').trim() : '';
-      if (!sel || sel.isCollapsed || !text) {
-        setSelection(null);
-        return;
-      }
-      const rect = sel.getRangeAt(0).getBoundingClientRect();
-      const containerRect = containerRef.current?.getBoundingClientRect();
-      if (!containerRect) return;
-      setSelection({
-        text,
-        x: Math.min(Math.max(rect.left - containerRect.left, 8), containerRect.width - 280),
-        y: Math.max(rect.top - containerRect.top - 56, 8),
-      });
-    }, 10);
+    window.setTimeout(syncSelection, 10);
   };
 
   const clearSelection = () => {

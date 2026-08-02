@@ -186,22 +186,41 @@ function App() {
     return { fullText, pages, pdfDoc: pdf };
   };
 
-  /** 根据每页文本，把单元映射到对应 PDF 页码（用于预览框自动跳页） */
+  /** 根据每页文本，把单元映射到对应 PDF 页码（用于预览框自动跳页）。
+   *  原理：重建与 buildLocalUnitsFromText 完全一致的归一化全文，
+   *  用单元首句在全文中的位置反推页码，避免跨页/换行导致匹配失败。 */
   const mapUnitsToPages = (units: UnitSection[], pages: string[]): UnitSection[] => {
-    const normalizedPages = pages.map(page => page.replace(/\s+/g, ' ').trim().toLowerCase());
-    const findPage = (needle: string, from: number) => {
-      const key = needle.replace(/\s+/g, ' ').trim().slice(0, 60).toLowerCase();
-      if (!key) return -1;
-      for (let i = from; i < normalizedPages.length; i += 1) {
-        if (normalizedPages[i].includes(key)) return i + 1;
+    const normPages = pages.map(page => page.replace(/\s+/g, ' ').trim());
+    const normStarts: number[] = [];
+    const pieces: string[] = [];
+    let pos = 0;
+    normPages.forEach((pageText, index) => {
+      const marker = `第 ${index + 1} 页:`;
+      if (index > 0) pos += 1;
+      pos += marker.length;
+      pieces.push(marker);
+      pos += 1;
+      normStarts.push(pos);
+      pieces.push(pageText);
+      pos += pageText.length;
+    });
+    const normFull = pieces.join(' ');
+    const pageForOffset = (offset: number) => {
+      let page = 1;
+      for (let p = 0; p < normStarts.length; p += 1) {
+        if (normStarts[p] <= offset) page = p + 1;
+        else break;
       }
-      return -1;
+      return page;
     };
+
+    let searchFrom = 0;
     let prevStartPage = 1;
     return units.map(unit => {
-      const firstSentence = unit.sentences[0] || unit.excerpt || unit.title;
-      const found = findPage(firstSentence, prevStartPage - 1);
-      const startPage = found > 0 ? found : prevStartPage;
+      const key = (unit.sentences[0] || unit.excerpt || unit.title).replace(/\s+/g, ' ').trim();
+      const idx = key ? normFull.indexOf(key, searchFrom) : -1;
+      const startPage = idx >= 0 ? pageForOffset(idx) : prevStartPage;
+      searchFrom = idx >= 0 ? idx + 1 : searchFrom;
       prevStartPage = startPage;
       return { ...unit, startPage, endPage: startPage };
     });
