@@ -44,3 +44,19 @@ body {
 .flashcard-back {
   transform: rotateY(180deg);
 }
+
+/* PDF 文字选区层（透明文字可选中，用于划线选择段落/句子/单词） */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+}
+.pdf-text-layer span {
+  position: absolute;
+  white-space: pre;
+  transform-origin: 0 0;
+  color: transparent;
+  cursor: text;
+  user-select: text;
+}

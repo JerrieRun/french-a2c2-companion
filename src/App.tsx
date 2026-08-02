@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import './App.css';
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.js?url';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { UnitPracticeCard } from './components/UnitPracticeCard';
 import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildDeepSeekUrl,
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
@@ -15,6 +16,14 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabKey>('materials');
   const [pdfName, setPdfName] = useState<string | null>(null);
   const [pdfText, setPdfText] = useState<string>('');
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [pdfPages, setPdfPages] = useState<string[]>([]);
+  const [pdfTargetPage, setPdfTargetPage] = useState<number | null>(null);
+  const [pdfJumpSignal, setPdfJumpSignal] = useState(0);
+  const [translationResult, setTranslationResult] = useState<string | null>(null);
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [wordDetailResult, setWordDetailResult] = useState<string | null>(null);
+  const [wordDetailLoading, setWordDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [materialPreview, setMaterialPreview] = useState<MaterialPreview | null>(null);
   const [candidateWords, setCandidateWords] = useState<WordCandidate[]>([]);
@@ -137,13 +146,18 @@ function App() {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const text = await extractTextFromPdf(arrayBuffer);
-      const preview = buildMaterialPreview(text);
-      const units = await parsePdfUnits(text);
-      const candidates = extractWordCandidates(text);
-      setPdfText(text || '无法识别 PDF 内容，请尝试其他文件。');
-      setMaterialPreview({ ...preview, units });
+      const { fullText, pages, pdfDoc } = await extractTextFromPdf(arrayBuffer);
+      const preview = buildMaterialPreview(fullText);
+      const units = await parsePdfUnits(fullText);
+      const unitsWithPages = mapUnitsToPages(units, pages);
+      const candidates = extractWordCandidates(fullText);
+      setPdfDoc(pdfDoc);
+      setPdfPages(pages);
+      setPdfText(fullText || '无法识别 PDF 内容，请尝试其他文件。');
+      setMaterialPreview({ ...preview, units: unitsWithPages });
       setSelectedUnitIndex(0);
+      setPdfTargetPage(unitsWithPages[0]?.startPage ?? null);
+      setPdfJumpSignal(signal => signal + 1);
       setCandidateWords(candidates);
     } catch (e) {
       console.error('PDF 提取失败：', e);
@@ -161,14 +175,36 @@ function App() {
 
     const loadingTask = getDocument({ data: arrayBuffer });
     const pdf = await loadingTask.promise;
-    let extracted = '';
+    const pages: string[] = [];
     for (let pageIndex = 1; pageIndex <= pdf.numPages; pageIndex += 1) {
       const page = await pdf.getPage(pageIndex);
       const content = await page.getTextContent();
       const pageText = content.items.map(item => ('str' in item ? item.str : '')).join(' ');
-      extracted += `\n\n第 ${pageIndex} 页:\n${pageText}`;
+      pages.push(pageText.trim());
     }
-    return extracted.trim();
+    const fullText = pages.map((pageText, index) => `\n\n第 ${index + 1} 页:\n${pageText}`).join('').trim();
+    return { fullText, pages, pdfDoc: pdf };
+  };
+
+  /** 根据每页文本，把单元映射到对应 PDF 页码（用于预览框自动跳页） */
+  const mapUnitsToPages = (units: UnitSection[], pages: string[]): UnitSection[] => {
+    const normalizedPages = pages.map(page => page.replace(/\s+/g, ' ').trim().toLowerCase());
+    const findPage = (needle: string, from: number) => {
+      const key = needle.replace(/\s+/g, ' ').trim().slice(0, 60).toLowerCase();
+      if (!key) return -1;
+      for (let i = from; i < normalizedPages.length; i += 1) {
+        if (normalizedPages[i].includes(key)) return i + 1;
+      }
+      return -1;
+    };
+    let prevStartPage = 1;
+    return units.map(unit => {
+      const firstSentence = unit.sentences[0] || unit.excerpt || unit.title;
+      const found = findPage(firstSentence, prevStartPage - 1);
+      const startPage = found > 0 ? found : prevStartPage;
+      prevStartPage = startPage;
+      return { ...unit, startPage, endPage: startPage };
+    });
   };
 
   const buildMaterialPreview = (text: string): MaterialPreview => {
@@ -551,6 +587,11 @@ function App() {
     setAnalysisPrompt(null);
     setPracticeExercises([]);
     setPracticePrompt(null);
+    const unit = materialPreview?.units[index];
+    if (unit?.startPage) {
+      setPdfTargetPage(unit.startPage);
+      setPdfJumpSignal(signal => signal + 1);
+    }
   };
 
   const deepSeekModeLabel = useMemo(() => {
@@ -596,21 +637,19 @@ function App() {
     }
   };
 
-  const handleAnalyzeSentence = async () => {
-    if (!selectedSentence) return;
+  const runAnalysisAndRecord = async (sentence: string) => {
     setLoading(true);
-
     try {
-      const result = await runDeepSeekAnalysis(selectedSentence);
+      const result = await runDeepSeekAnalysis(sentence);
       setAnalysisResult(result);
 
       const record: AnalysisRecord = {
-        sentence: selectedSentence,
+        sentence,
         summary: result.summary,
         grammarPoints: result.grammarPoints,
         commonMistakes: result.commonMistakes,
         analyzedAt: new Date().toISOString(),
-        promptPreview: result.debug?.promptPreview || analysisPrompt || undefined,
+        promptPreview: result.debug?.promptPreview || undefined,
       };
       setAnalysisHistory(prev => [record, ...prev].slice(0, 12));
     } catch (e) {
@@ -623,6 +662,17 @@ function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleAnalyzeSentence = async () => {
+    if (!selectedSentence) return;
+    await runAnalysisAndRecord(selectedSentence);
+  };
+
+  const runSelectedTextAnalysis = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    await runAnalysisAndRecord(trimmed);
   };
 
   const handleGeneratePractice = async () => {
@@ -654,6 +704,70 @@ function App() {
     setWordBook(prev => {
       if (prev.some(item => item.text === candidate.text)) return prev;
       return [...prev, candidate];
+    });
+  };
+
+  const runSelectedTextTranslation = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setTranslationLoading(true);
+    setTranslationResult(null);
+    try {
+      if (deepSeekApiKey) {
+        const content = await callDeepSeekChat({ apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+          '你是一位法语翻译助手。请把用户输入的法语内容翻译成准确自然的中文；若输入是中文则翻译成法语。只输出译文，不要额外解释。',
+          trimmed,
+          1024
+        );
+        setTranslationResult(content.trim());
+      } else {
+        setTranslationResult(`（本地词典逐词翻译）${translateSentence(trimmed)}`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setTranslationResult(`翻译失败：${message}。已回退到本地逐词翻译：${translateSentence(trimmed)}`);
+    } finally {
+      setTranslationLoading(false);
+    }
+  };
+
+  const runSelectedWordDetail = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const word = trimmed.split(/\s+/)[0].replace(/[^a-zàâçéèêëîïôûùüÿæœ]/gi, '').toLowerCase() || trimmed;
+    setWordDetailLoading(true);
+    setWordDetailResult(null);
+    try {
+      if (deepSeekApiKey) {
+        const content = await callDeepSeekChat({ apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+          '你是一位法语词汇专家。请用中文详细解释用户给出的法语单词或短语：词性、中文释义、1-2 个用法例句、CEFR 等级建议。',
+          `词汇：${trimmed}`,
+          1024
+        );
+        setWordDetailResult(content.trim());
+      } else {
+        const local = translateWord(word);
+        const detail = local === '待补充'
+          ? '本地词典暂无释义。配置 DeepSeek API Key 后可获得完整详解（词性、例句、CEFR）。'
+          : local;
+        setWordDetailResult(`${word}：${detail}（本地词典）`);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setWordDetailResult(`单词详解失败：${message}`);
+    } finally {
+      setWordDetailLoading(false);
+    }
+  };
+
+  const handleAddSelectedWord = (text: string) => {
+    const word = text.trim().split(/\s+/)[0].replace(/[^a-zàâçéèêëîïôûùüÿæœ]/gi, '').toLowerCase();
+    if (!word) return;
+    handleAddToWordBook({
+      text: word,
+      cefr: getCeFrTag(word),
+      translation: translateWord(word),
+      frequency: 1,
     });
   };
 
@@ -830,6 +944,17 @@ function App() {
       setDeepSeekConfigOpen={ setDeepSeekConfigOpen }
       handleFileChange={ handleFileChange }
       handleUnitSelect={ handleUnitSelect }
+      pdfDoc={ pdfDoc }
+      pdfTargetPage={ pdfTargetPage }
+      pdfJumpSignal={ pdfJumpSignal }
+      onTranslateText={ runSelectedTextTranslation }
+      onAnalyzeText={ runSelectedTextAnalysis }
+      onWordDetail={ runSelectedWordDetail }
+      onAddWord={ handleAddSelectedWord }
+      translationResult={ translationResult }
+      translationLoading={ translationLoading }
+      wordDetailResult={ wordDetailResult }
+      wordDetailLoading={ wordDetailLoading }
       handleSentenceSelect={ handleSentenceSelect }
       handleAddToWordBook={ handleAddToWordBook }
       handleAnalyzeSentence={ handleAnalyzeSentence }

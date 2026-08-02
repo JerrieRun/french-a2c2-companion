@@ -7,6 +7,10 @@ export type UnitSection = {
   sentences: string[];
   vocabulary: WordCandidate[];
   practice: string[];
+  /** 单元对应的 PDF 起始页（1 基） */
+  startPage?: number;
+  /** 单元对应的 PDF 结束页（1 基） */
+  endPage?: number;
 };
 
 export type MaterialPreview = {

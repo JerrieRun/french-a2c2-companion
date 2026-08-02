@@ -1,4 +1,6 @@
 import type { ChangeEvent } from 'react';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+import { PdfViewer } from '../components/PdfViewer';
 import { UnitPracticeCard } from '../components/UnitPracticeCard';
 import { UnitSummaryCard } from '../components/UnitSummaryCard';
 import { UnitVocabularyCard } from '../components/UnitVocabularyCard';
@@ -57,6 +59,18 @@ type MaterialsTabProps = {
   setDeepSeekConfigOpen: (updater: (prev: boolean) => boolean) => void;
   // 事件处理
   handleFileChange: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
+  // PDF 原页预览（划线选择）
+  pdfDoc: PDFDocumentProxy | null;
+  pdfTargetPage: number | null;
+  pdfJumpSignal: number;
+  onTranslateText: (text: string) => Promise<void>;
+  onAnalyzeText: (text: string) => Promise<void>;
+  onWordDetail: (text: string) => Promise<void>;
+  onAddWord: (text: string) => void;
+  translationResult: string | null;
+  translationLoading: boolean;
+  wordDetailResult: string | null;
+  wordDetailLoading: boolean;
   handleUnitSelect: (index: number) => void;
   handleSentenceSelect: (index: number) => void;
   handleAddToWordBook: (candidate: WordCandidate) => void;
@@ -81,6 +95,9 @@ export function MaterialsTab(props: MaterialsTabProps) {
     deepSeekConfigOpen, setDeepSeekConfigOpen,
     handleFileChange, handleUnitSelect, handleSentenceSelect, handleAddToWordBook,
     handleAnalyzeSentence, handleGeneratePractice, testDeepSeekConnection, translateSentence,
+    pdfDoc, pdfTargetPage, pdfJumpSignal,
+    onTranslateText, onAnalyzeText, onWordDetail, onAddWord,
+    translationResult, translationLoading, wordDetailResult, wordDetailLoading,
   } = props;
   return (
     <>
@@ -102,6 +119,22 @@ export function MaterialsTab(props: MaterialsTabProps) {
       </div>
     </div>
   </div>
+
+  {pdfDoc && (
+    <PdfViewer
+      pdfDoc={pdfDoc}
+      targetPage={pdfTargetPage}
+      jumpSignal={pdfJumpSignal}
+      onTranslateText={onTranslateText}
+      onAnalyzeText={onAnalyzeText}
+      onWordDetail={onWordDetail}
+      onAddWord={onAddWord}
+      translationResult={translationResult}
+      translationLoading={translationLoading}
+      wordDetailResult={wordDetailResult}
+      wordDetailLoading={wordDetailLoading}
+    />
+  )}
 
   <div className="grid gap-6 lg:grid-cols-2">
     <div className="rounded-[28px] bg-white p-6 shadow-sm">
@@ -325,6 +358,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
                 }`}
               >
                 {unit.title}
+                {unit.startPage ? <span className={`ml-1 text-xs ${selectedUnitIndex === index ? 'text-white/80' : 'text-slate-400'}`}>P{unit.startPage}</span> : null}
               </button>
             ))}
           </div>

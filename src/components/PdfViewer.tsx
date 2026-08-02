@@ -1,0 +1,284 @@
+import { useEffect, useRef, useState } from 'react';
+import type { PDFDocumentProxy } from 'pdfjs-dist';
+
+type PdfViewerProps = {
+  pdfDoc: PDFDocumentProxy | null;
+  targetPage: number | null;
+  jumpSignal: number;
+  onTranslateText: (text: string) => Promise<void> | void;
+  onAnalyzeText: (text: string) => Promise<void> | void;
+  onWordDetail: (text: string) => Promise<void> | void;
+  onAddWord: (text: string) => void;
+  translationResult: string | null;
+  translationLoading: boolean;
+  wordDetailResult: string | null;
+  wordDetailLoading: boolean;
+};
+
+/** 合并 pdf.js 视口变换与文本项变换（等价 Util.transform） */
+const combineTransform = (a: number[], b: number[]): number[] => {
+  const [a1, b1, c1, d1, e1, f1] = a;
+  const [a2, b2, c2, d2, e2, f2] = b;
+  return [
+    a1 * a2 + c1 * b2,
+    b1 * a2 + d1 * b2,
+    a1 * c2 + c1 * d2,
+    b1 * c2 + d1 * d2,
+    a1 * e2 + c1 * f2 + e1,
+    b1 * e2 + d1 * f2 + f1,
+  ];
+};
+
+function PdfPage({
+  pdfDoc,
+  pageNumber,
+  scale,
+}: {
+  pdfDoc: PDFDocumentProxy;
+  pageNumber: number;
+  scale: number;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const layerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let renderTask: { promise: Promise<void>; cancel: () => void } | undefined;
+
+    (async () => {
+      const page = await pdfDoc.getPage(pageNumber);
+      const viewport = page.getViewport({ scale });
+      if (cancelled) return;
+      setSize({ w: viewport.width, h: viewport.height });
+
+      const canvas = canvasRef.current;
+      const layer = layerRef.current;
+      if (!canvas || !layer) return;
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      renderTask = page.render({ canvasContext: ctx, viewport });
+      await renderTask.promise;
+      if (cancelled) return;
+
+      const content = await page.getTextContent();
+      if (cancelled) return;
+      layer.innerHTML = '';
+      for (const item of content.items) {
+        if (!('str' in item) || !item.str) continue;
+        const t = combineTransform(viewport.transform, item.transform);
+        const fontHeight = Math.hypot(t[2], t[3]) || 1;
+        const span = document.createElement('span');
+        span.textContent = item.str + (item.hasEOL ? '\n' : '');
+        span.style.left = `${t[4]}px`;
+        span.style.top = `${t[5] - fontHeight}px`;
+        span.style.fontSize = `${fontHeight}px`;
+        span.style.transform = `scaleX(${t[0] / fontHeight})`;
+        span.style.transformOrigin = '0 0';
+        layer.appendChild(span);
+      }
+    })().catch(err => console.warn(`第 ${pageNumber} 页渲染失败：`, err));
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel();
+    };
+  }, [pdfDoc, pageNumber, scale]);
+
+  return (
+    <div
+      className="relative mx-auto mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+      data-page={pageNumber}
+    >
+      {size && <canvas ref={canvasRef} style={{ width: size.w, height: size.h }} />}
+      <div
+        ref={layerRef}
+        className="pdf-text-layer"
+        style={size ? { width: size.w, height: size.h } : undefined}
+      />
+      <span className="pointer-events-none absolute bottom-2 right-3 rounded-full bg-white/90 px-3 py-1 text-xs font-semibold text-slate-500">
+        第 {pageNumber} 页
+      </span>
+    </div>
+  );
+}
+
+export function PdfViewer(props: PdfViewerProps) {
+  const {
+    pdfDoc,
+    targetPage,
+    jumpSignal,
+    onTranslateText,
+    onAnalyzeText,
+    onWordDetail,
+    onAddWord,
+    translationResult,
+    translationLoading,
+    wordDetailResult,
+    wordDetailLoading,
+  } = props;
+  const [scale, setScale] = useState(1.15);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [selection, setSelection] = useState<{ text: string; x: number; y: number } | null>(null);
+  const [selectionBusy, setSelectionBusy] = useState(false);
+
+  // 单元被选中时自动跳到对应 PDF 页
+  useEffect(() => {
+    if (!pdfDoc || targetPage == null) return;
+    const el = containerRef.current?.querySelector<HTMLElement>(`[data-page="${targetPage}"]`);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [pdfDoc, targetPage, jumpSignal]);
+
+  const handleMouseUp = () => {
+    window.setTimeout(() => {
+      const sel = window.getSelection();
+      const text = sel ? sel.toString().replace(/\s+/g, ' ').trim() : '';
+      if (!sel || sel.isCollapsed || !text) {
+        setSelection(null);
+        return;
+      }
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      const containerRect = containerRef.current?.getBoundingClientRect();
+      if (!containerRect) return;
+      setSelection({
+        text,
+        x: Math.min(Math.max(rect.left - containerRect.left, 8), containerRect.width - 280),
+        y: Math.max(rect.top - containerRect.top - 56, 8),
+      });
+    }, 10);
+  };
+
+  const clearSelection = () => {
+    window.getSelection()?.removeAllRanges();
+    setSelection(null);
+  };
+
+  const runAction = async (action: 'translate' | 'analyze' | 'word' | 'add') => {
+    if (!selection) return;
+    setSelectionBusy(true);
+    try {
+      if (action === 'translate') await onTranslateText(selection.text);
+      else if (action === 'analyze') await onAnalyzeText(selection.text);
+      else if (action === 'word') await onWordDetail(selection.text);
+      else onAddWord(selection.text);
+    } finally {
+      setSelectionBusy(false);
+    }
+    clearSelection();
+  };
+
+  if (!pdfDoc) return null;
+
+  const pages = Array.from({ length: pdfDoc.numPages }, (_, index) => index + 1);
+
+  return (
+    <div className="rounded-[28px] border border-slate-200 bg-white/90 p-5 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-semibold text-slate-900">📄 教材原页预览</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            在下方 PDF 上划线选中段落 / 句子 / 单词，即可翻译、解析句型、单词详解或加入生词本。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setScale(s => Math.max(0.6, +(s - 0.15).toFixed(2)))}
+            className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+          >
+            −
+          </button>
+          <span className="w-12 text-center text-xs font-semibold text-slate-500">{Math.round(scale * 100)}%</span>
+          <button
+            type="button"
+            onClick={() => setScale(s => Math.min(2.5, +(s + 0.15).toFixed(2)))}
+            className="rounded-xl bg-slate-100 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-200"
+          >
+            +
+          </button>
+        </div>
+      </div>
+
+      <div ref={containerRef} className="relative mt-4">
+        <div
+          className="max-h-[70vh] overflow-auto rounded-2xl bg-slate-100 p-4"
+          onMouseUp={handleMouseUp}
+        >
+          {pages.map(pageNumber => (
+            <PdfPage key={pageNumber} pdfDoc={pdfDoc} pageNumber={pageNumber} scale={scale} />
+          ))}
+        </div>
+
+        {selection && (
+          <div
+            className="absolute z-20 flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-lg"
+            style={{ left: selection.x, top: selection.y }}
+          >
+            <span className="max-w-[200px] truncate text-xs text-slate-400">
+              “{selection.text.slice(0, 30)}”
+            </span>
+            <button
+              type="button"
+              disabled={selectionBusy}
+              onClick={() => runAction('translate')}
+              className="rounded-xl bg-sky/30 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-sky/50"
+            >
+              🌐 翻译
+            </button>
+            <button
+              type="button"
+              disabled={selectionBusy}
+              onClick={() => runAction('analyze')}
+              className="rounded-xl bg-lavender/40 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-lavender/70"
+            >
+              🧩 句型
+            </button>
+            <button
+              type="button"
+              disabled={selectionBusy}
+              onClick={() => runAction('word')}
+              className="rounded-xl bg-blush/40 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-blush/70"
+            >
+              📖 详解
+            </button>
+            <button
+              type="button"
+              disabled={selectionBusy}
+              onClick={() => runAction('add')}
+              className="rounded-xl bg-gradient-to-r from-warm to-coral px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+            >
+              ➕ 生词
+            </button>
+            <button
+              type="button"
+              onClick={clearSelection}
+              className="rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-400 hover:bg-slate-100"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+      </div>
+
+      {(translationResult || translationLoading) && (
+        <div className="mt-4 rounded-2xl border border-sky/40 bg-sky/10 p-4">
+          <p className="text-xs font-semibold text-slate-500">🌐 翻译结果</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">
+            {translationLoading ? '翻译中…' : translationResult}
+          </p>
+        </div>
+      )}
+      {(wordDetailResult || wordDetailLoading) && (
+        <div className="mt-4 rounded-2xl border border-lavender/50 bg-lavender/10 p-4">
+          <p className="text-xs font-semibold text-slate-500">📖 单词 / 短语详解</p>
+          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">
+            {wordDetailLoading ? '详解生成中…' : wordDetailResult}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
