@@ -13,22 +13,23 @@
 - [x] 进度页：分析历史复盘、清空、导出
 
 ## 🔄 进行中 / 下一步候选（按优先级排序，由用户挑选）
-- [ ] **1. App.tsx 拆分重构**（1408 行 → 按 Tab/功能拆文件）
-  - [x] 2026-08-02 第一步：类型 → `src/types.ts`；DeepSeek 纯函数层 → `src/lib/deepseek.ts`（构建验证通过）
-  - [ ] 第二步：按 Tab 抽取 UI 组件（learn/materials/progress 各一个容器组件）
+- [x] **1. App.tsx 拆分重构**（2026-08-02 完成，1564 → 862 行，构建验证通过）
+  - [x] 类型 → `src/types.ts`；DeepSeek 纯函数层 → `src/lib/deepseek.ts`
+  - [x] 三个 Tab → `src/tabs/LearnTab.tsx` / `MaterialsTab.tsx` / `ProgressTab.tsx`
 - [ ] 2. git 基线提交 — 文档已就绪，**需用户在终端执行**：`git init && git add -A && git commit -m "基线"`（Codex 沙箱禁止创建 .git）
-- [ ] 3. 学习 Tab 的「通用学习系统」目前较空，可补充词汇卡片/闪卡练习
+- [x] 3. 学习 Tab 单词闪卡（2026-08-02：FlashcardDeck + 熟练度持久化）
 - [ ] 4. 登录与云端存储（Supabase）——README 规划中的方向
 - [ ] 5. 自动测试（Vitest）
 
 ## 💡 待办（想法池）
+- [ ] 闪卡练习模式增强：拼写测验、发音（TTS）、按 CEFR 分级过滤
 - [ ] 生词本导出/导入（目前只有进度历史能导出）
 - [ ] 深色模式切换
 - [ ] PWA / 离线可用
 - [ ] 移除未使用的 react-router-dom 依赖（或真正引入路由）
 
 ## 🔧 已知技术债
-- App.tsx 单文件过大，状态 + 逻辑 + JSX 混合，难以维护
+- App.tsx 仍集中了全部状态与业务逻辑（~860 行），可继续抽 hooks（如 useDeepSeek、useLocalStorage）
 - DeepSeek API key 在前端暴露，存在泄露风险（长期应加代理后端）
 - 无类型定义文件（types 都内联在 App.tsx 顶部）
 - 无测试、无 CI

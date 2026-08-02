@@ -25,3 +25,22 @@ body {
 ::selection {
   background: rgba(255, 137, 102, 0.25);
 }
+
+/* 单词闪卡翻面动画 */
+.flashcard-scene {
+  perspective: 1200px;
+}
+.flashcard-inner {
+  transition: transform 0.45s ease;
+  transform-style: preserve-3d;
+}
+.flashcard-inner.flipped {
+  transform: rotateY(180deg);
+}
+.flashcard-face {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.flashcard-back {
+  transform: rotateY(180deg);
+}
