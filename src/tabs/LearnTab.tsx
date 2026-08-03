@@ -10,6 +10,7 @@ type LearnTabProps = {
   onFlashcardMasteryChange: (word: string, delta: number) => void;
   writingLoading: boolean;
   writingResult: string | null;
+  writingPrompt?: string | null;
   onWritingCorrection: (text: string) => void;
   grammarLoading: boolean;
   grammarExercises: GrammarExercise[] | null;
@@ -22,6 +23,7 @@ export function LearnTab({
   onFlashcardMasteryChange,
   writingLoading,
   writingResult,
+  writingPrompt,
   onWritingCorrection,
   grammarLoading,
   grammarExercises,
@@ -31,7 +33,7 @@ export function LearnTab({
     <div className="grid gap-6 md:grid-cols-2">
       <FlashcardDeck words={wordBook} mastery={flashcardMastery} onMasteryChange={onFlashcardMasteryChange} />
       <GrammarPractice loading={grammarLoading} exercises={grammarExercises} onGenerate={onGrammarGenerate} />
-      <WritingPractice loading={writingLoading} result={writingResult} onCorrect={onWritingCorrection} />
+      <WritingPractice loading={writingLoading} result={writingResult} onCorrect={onWritingCorrection} initialPrompt={writingPrompt} />
       <ListeningPractice />
     </div>
   );

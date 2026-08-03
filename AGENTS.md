@@ -18,7 +18,7 @@
 ## 目录结构
 - `src/App.tsx` — 根组件（~860 行）：全局状态 + 业务逻辑 + Tab 路由
 - `src/tabs/LearnTab.tsx` — 学习 Tab：单词闪卡、语法练习、写作批改、听力跟读（2 列网格）
-- `src/tabs/PathTab.tsx` — 课程路径 Tab：CEFR 分级课程卡 → 单元 → 课时（精读/词汇/跟读/语法），课时解锁门槛 + 进度持久化（localStorage `french-path-progress`）
+- `src/tabs/PathTab.tsx` — 课程路径 Tab：CEFR 分级课程卡 → 单元 → 8 类课时（精读/句型/词汇/练习/跟读/语法/写作/复习，全部直接可学，无解锁门槛），进度标记持久化（localStorage `french-path-progress`）
 - `src/tabs/MaterialsTab.tsx` — 教材中心 Tab（解析、选句分析、DeepSeek 配置、生词收藏）
 - `src/tabs/ProgressTab.tsx` — 进度复盘 Tab
 - `src/components/FlashcardDeck.tsx` — 单词闪卡组件（翻面动画、认识/再练、熟练度）

@@ -1,13 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 type WritingPracticeProps = {
   loading: boolean;
   result: string | null;
   onCorrect: (text: string) => void;
+  initialPrompt?: string | null;
 };
 
-export function WritingPractice({ loading, result, onCorrect }: WritingPracticeProps) {
+export function WritingPractice({ loading, result, onCorrect, initialPrompt }: WritingPracticeProps) {
   const [text, setText] = useState('');
+
+  useEffect(() => {
+    if (initialPrompt) setText(initialPrompt);
+  }, [initialPrompt]);
 
   return (
     <article className="rounded-[28px] bg-cream p-5 shadow-sm">

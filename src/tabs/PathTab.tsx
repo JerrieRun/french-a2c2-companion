@@ -3,12 +3,16 @@ import type { MaterialPreview, PathProgress } from '../types';
 
 const STORAGE_KEY = 'french-path-progress';
 
-/** 每个单元固定 4 个课时，模拟 Luke Academy 的课时粒度 */
+/** 每个单元固定 8 个课时：精读 / 句型 / 词汇 / 练习 / 跟读 / 语法 / 写作 / 复习 */
 const LESSONS = [
   { key: 'reading', icon: '📖', name: '课文精读', desc: '回到教材原文精读本单元：可划线翻译、解析句型、点词看详解、收藏生词。' },
+  { key: 'pattern', icon: '🧩', name: '句型精析', desc: '选取本单元一个核心句子，用 DeepSeek 拆解语法结构、归纳句型并指出易错点。' },
   { key: 'vocab', icon: '📚', name: '核心词汇', desc: '把本单元核心词汇一键加入生词本，之后到「通用学习」用闪卡复习。' },
+  { key: 'practice', icon: '🎯', name: '单元练习', desc: '针对本单元主题生成练习题，先作答再对答案，巩固本单元表达。' },
   { key: 'listening', icon: '🗣️', name: '朗读跟读', desc: '到「通用学习」用浏览器语音跟读本单元课文，训练语音语调。' },
-  { key: 'grammar', icon: '✍️', name: '语法要点', desc: '针对本单元主题生成语法练习题，先作答再对答案。' },
+  { key: 'grammar', icon: '✍️', name: '语法要点', desc: '按当前 CEFR 等级生成语法练习题，系统梳理本单元涉及的语法点。' },
+  { key: 'writing', icon: '📝', name: '写作复述', desc: '用本单元主题与词汇写一段 5-8 句法语短文，DeepSeek 帮你批改润色。' },
+  { key: 'review', icon: '🔄', name: '闪卡复习', desc: '把本单元核心词汇并入生词本，并到「通用学习」用闪卡快速过一遍。' },
 ];
 
 const LEVELS = ['A2', 'B1', 'B2', 'C1', 'C2'];
@@ -17,8 +21,10 @@ type PathTabProps = {
   materialPreview: MaterialPreview | null;
   pdfName: string | null;
   onOpenUnitInPdf: (unitIndex: number) => void;
+  onAnalyzeUnitSentence: (unitIndex: number) => void;
   onStartGrammar: (level: string, topic: string) => void;
   onAddUnitWords: (unitIndex: number) => number;
+  onWritingPrompt: (prompt: string) => void;
   onGoMaterials: () => void;
   onGoLearn: () => void;
 };
@@ -38,8 +44,10 @@ export function PathTab({
   materialPreview,
   pdfName,
   onOpenUnitInPdf,
+  onAnalyzeUnitSentence,
   onStartGrammar,
   onAddUnitWords,
+  onWritingPrompt,
   onGoMaterials,
   onGoLearn,
 }: PathTabProps) {
@@ -77,14 +85,6 @@ export function PathTab({
   const lessonTotal = course ? course.units.length * LESSONS.length : 0;
   const lessonDone = Object.values(progress).filter(Boolean).length;
 
-  /** 解锁规则：第 1 个课时可学；完成一课解锁下一课；完成上一单元末课解锁下一单元 */
-  const isUnlocked = (unit: number, lesson: number): boolean => {
-    if (!course) return false;
-    if (unit === 0 && lesson === 0) return true;
-    if (lesson > 0) return !!progress[`${unit}:${lesson - 1}`];
-    return !!progress[`${unit - 1}:${LESSONS.length - 1}`];
-  };
-
   const toggleDone = (unit: number, lesson: number) => {
     setProgress(prev => {
       const next = { ...prev };
@@ -104,17 +104,35 @@ export function PathTab({
       case 'reading':
         onOpenUnitInPdf(unit);
         break;
+      case 'pattern':
+        onAnalyzeUnitSentence(unit);
+        break;
       case 'vocab': {
         const added = onAddUnitWords(unit);
         setNotice(added > 0 ? `✅ 已将 ${added} 个核心词汇加入生词本，可到「通用学习」用闪卡复习。` : '📚 本单元词汇已在生词本中，无需重复添加。');
         break;
       }
+      case 'practice':
+        onStartGrammar(course?.level || 'B2', u.title);
+        break;
       case 'listening':
         onGoLearn();
         break;
       case 'grammar':
-        onStartGrammar(course?.level || 'B2', u.title);
+        onStartGrammar(course?.level || 'B2', `${u.title}（语法要点）`);
         break;
+      case 'writing': {
+        const added = onAddUnitWords(unit);
+        onWritingPrompt(`本单元主题：${u.title}。请用本单元学到的词汇和表达，写一段 5-8 句的法语短文，介绍或评论这个主题。`);
+        setNotice(added > 0 ? `✅ 已将 ${added} 个核心词汇加入生词本，写作时可以参考。` : '📚 本单元词汇已在生词本中。');
+        break;
+      }
+      case 'review': {
+        const added = onAddUnitWords(unit);
+        onGoLearn();
+        setNotice(added > 0 ? `✅ 已将 ${added} 个核心词汇并入生词本，现在用闪卡复习。` : '📚 本单元词汇已在生词本中，去闪卡复习吧。');
+        break;
+      }
     }
   };
 
@@ -122,12 +140,11 @@ export function PathTab({
   if (view === 'list') {
     return (
       <div className="space-y-6">
-        {/* 顶部：路线总览 */}
         <div className="rounded-[28px] bg-gradient-to-r from-warm to-coral p-6 text-white shadow-sm">
           <h3 className="text-xl font-semibold">🗺️ 法语分级学习路径</h3>
           <p className="mt-2 max-w-2xl text-sm text-white/90">
-            参考 Luke Academy 的课程体系：按 CEFR 等级组织课程 → 单元 → 课时，一课一练，完成当前课时解锁下一课时。
-            上传教材并解析后，系统会自动为对应等级生成一门课程。
+            参考 Luke Academy 的课程体系：按 CEFR 等级组织课程 → 单元 → 课时。每个单元 8 个课时，
+            覆盖精读、句型、词汇、练习、跟读、语法、写作与复习，一课一练，随时可学。
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             {LEVELS.map((lv, i) => {
@@ -155,7 +172,6 @@ export function PathTab({
           </div>
         )}
 
-        {/* 课程卡 */}
         {course ? (
           <div className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -170,7 +186,7 @@ export function PathTab({
                 </div>
               </div>
               <div className="text-right text-sm text-slate-600">
-                <p><span className="font-bold text-slate-900">课时 {lessonDone}/{lessonTotal}</span>；习题 0/{course.exercisesTotal}</p>
+                <p><span className="font-bold text-slate-900">课时 {lessonDone}/{lessonTotal}</span>；习题 {course.exercisesTotal} 道</p>
                 <button
                   type="button"
                   onClick={() => setView('detail')}
@@ -181,7 +197,7 @@ export function PathTab({
               </div>
             </div>
             <p className="mt-3 text-sm text-slate-600">
-              共 {course.units.length} 个单元，每单元 4 个课时（精读 / 词汇 / 跟读 / 语法）。完成一课，解锁下一课。
+              共 {course.units.length} 个单元，每单元 8 个课时（精读 / 句型 / 词汇 / 练习 / 跟读 / 语法 / 写作 / 复习）。全部课时直接可学。
             </p>
           </div>
         ) : (
@@ -202,7 +218,6 @@ export function PathTab({
           </div>
         )}
 
-        {/* 其他等级（未上传教材 = 开发中，对齐 Luke Academy 的“开发中”卡片） */}
         <div className="grid gap-4 md:grid-cols-2">
           {LEVELS.filter(lv => lv !== course?.level).map(lv => (
             <div key={lv} className="rounded-[28px] border border-slate-200 bg-white/70 p-5 opacity-80">
@@ -265,23 +280,17 @@ export function PathTab({
           <p className="mt-1 text-sm text-slate-500">{unit.summary || unit.excerpt?.slice(0, 80) || '本单元学习内容'}</p>
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             {LESSONS.map((lesson, lIdx) => {
-              const unlocked = isUnlocked(uIdx, lIdx);
               const done = !!progress[`${uIdx}:${lIdx}`];
               return (
                 <button
                   key={lesson.key}
                   type="button"
-                  disabled={!unlocked}
                   onClick={() => setDialog({ unit: uIdx, lesson: lIdx })}
                   className={`relative rounded-3xl border p-4 text-left transition ${
-                    done
-                      ? 'border-emerald-300 bg-emerald-50'
-                      : unlocked
-                      ? 'border-slate-200 bg-cream hover:shadow-md'
-                      : 'border-slate-200 bg-slate-50 opacity-60'
+                    done ? 'border-emerald-300 bg-emerald-50 hover:shadow-md' : 'border-slate-200 bg-cream hover:shadow-md'
                   }`}
                 >
-                  <div className="text-2xl">{unlocked ? lesson.icon : '🔒'}</div>
+                  <div className="text-2xl">{lesson.icon}</div>
                   <div className="mt-2 text-sm font-semibold text-slate-800">{lesson.name}</div>
                   <div className="mt-1 text-xs text-slate-500">第 {lIdx + 1} 课</div>
                   {done && <span className="absolute right-3 top-3 text-emerald-500">✓</span>}
@@ -296,48 +305,33 @@ export function PathTab({
       {dlg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onClick={() => setDialog(null)}>
           <div className="w-full max-w-md rounded-[28px] bg-white p-6 shadow-2xl" onClick={e => e.stopPropagation()}>
-            {!isUnlocked(dlg.uIdx, dlg.lIdx) ? (
-              <>
-                <div className="text-3xl">🔒</div>
-                <h4 className="mt-2 text-lg font-semibold text-slate-900">{dlg.lesson.name} · 该课未解锁</h4>
-                <p className="mt-2 text-sm text-slate-600">第 {dlg.lIdx + 1} 课，本单元共 {LESSONS.length} 课。先完成上一课时，解锁后即可学习。</p>
-                <div className="mt-5 flex justify-end gap-3">
-                  <button type="button" onClick={() => setDialog(null)} className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200">
-                    取消
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="text-3xl">{dlg.lesson.icon}</div>
-                <h4 className="mt-2 text-lg font-semibold text-slate-900">
-                  {dlg.unit.title} · {dlg.lesson.name}
-                </h4>
-                <p className="mt-1 text-sm text-slate-500">
-                  第 {dlg.lIdx + 1} 课，本单元共 {LESSONS.length} 课
-                </p>
-                <p className="mt-3 text-sm text-slate-600">{dlg.lesson.desc}</p>
-                <div className="mt-5 flex flex-wrap justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={() => toggleDone(dlg.uIdx, dlg.lIdx)}
-                    className={`rounded-2xl px-4 py-2 text-sm font-semibold ${
-                      progress[`${dlg.uIdx}:${dlg.lIdx}`]
-                        ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
-                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                    }`}
-                  >
-                    {progress[`${dlg.uIdx}:${dlg.lIdx}`] ? '✓ 已完成（点击取消）' : '标记完成'}
-                  </button>
-                  <button type="button" onClick={() => startLesson(dlg.uIdx, dlg.lIdx)} className="rounded-2xl bg-gradient-to-r from-warm to-coral px-5 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90">
-                    开始学习
-                  </button>
-                  <button type="button" onClick={() => setDialog(null)} className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200">
-                    取消
-                  </button>
-                </div>
-              </>
-            )}
+            <div className="text-3xl">{dlg.lesson.icon}</div>
+            <h4 className="mt-2 text-lg font-semibold text-slate-900">
+              {dlg.unit.title} · {dlg.lesson.name}
+            </h4>
+            <p className="mt-1 text-sm text-slate-500">
+              第 {dlg.lIdx + 1} 课，本单元共 {LESSONS.length} 课
+            </p>
+            <p className="mt-3 text-sm text-slate-600">{dlg.lesson.desc}</p>
+            <div className="mt-5 flex flex-wrap justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => toggleDone(dlg.uIdx, dlg.lIdx)}
+                className={`rounded-2xl px-4 py-2 text-sm font-semibold ${
+                  progress[`${dlg.uIdx}:${dlg.lIdx}`]
+                    ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {progress[`${dlg.uIdx}:${dlg.lIdx}`] ? '✓ 已完成（点击取消）' : '标记完成'}
+              </button>
+              <button type="button" onClick={() => startLesson(dlg.uIdx, dlg.lIdx)} className="rounded-2xl bg-gradient-to-r from-warm to-coral px-5 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90">
+                开始学习
+              </button>
+              <button type="button" onClick={() => setDialog(null)} className="rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-200">
+                取消
+              </button>
+            </div>
           </div>
         </div>
       )}

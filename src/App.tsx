@@ -61,6 +61,7 @@ function App() {
   const [wordBook, setWordBook] = useState<WordCandidate[]>([]);
   const [flashcardMastery, setFlashcardMastery] = useState<Record<string, number>>({});
   const [writingResult, setWritingResult] = useState<string | null>(null);
+  const [writingPrompt, setWritingPrompt] = useState<string | null>(null);
   const [writingLoading, setWritingLoading] = useState(false);
   const [grammarExercises, setGrammarExercises] = useState<GrammarExercise[] | null>(null);
   const [grammarLoading, setGrammarLoading] = useState(false);
@@ -752,6 +753,23 @@ function App() {
     return fresh.length;
   };
 
+  /** 课程路径：课时「句型精析」→ 切到教材中心并分析该单元第一个核心句子 */
+  const handleAnalyzeUnitSentenceFromPath = async (unitIndex: number) => {
+    const unit = materialPreview?.units[unitIndex];
+    const sentence = unit?.sentences?.find(s => s.trim().length > 8) || unit?.sentences?.[0];
+    if (!sentence) return;
+    setSelectedUnitIndex(unitIndex);
+    setSelectedSentenceIndex(0);
+    setActiveTab('materials');
+    await runAnalysisAndRecord(sentence);
+  };
+
+  /** 课程路径：课时「写作复述」→ 预填写作题目并切到通用学习 */
+  const handleWritingPromptFromPath = (prompt: string) => {
+    setWritingPrompt(prompt);
+    setActiveTab('learn');
+  };
+
   const deepSeekModeLabel = useMemo(() => {
     const hasCustom =
       resolveCustomEndpoint(deepSeekParseUrl, deepSeekApiUrl) ||
@@ -1108,8 +1126,10 @@ function App() {
       materialPreview={materialPreview}
       pdfName={pdfName}
       onOpenUnitInPdf={handleOpenUnitFromPath}
+      onAnalyzeUnitSentence={handleAnalyzeUnitSentenceFromPath}
       onStartGrammar={handleStartGrammarFromPath}
       onAddUnitWords={handleAddUnitWordsFromPath}
+      onWritingPrompt={handleWritingPromptFromPath}
       onGoMaterials={() => setActiveTab('materials')}
       onGoLearn={() => setActiveTab('learn')}
     />
@@ -1122,6 +1142,7 @@ function App() {
       onFlashcardMasteryChange={handleFlashcardMasteryChange}
       writingLoading={writingLoading}
       writingResult={writingResult}
+      writingPrompt={writingPrompt}
       onWritingCorrection={runWritingCorrection}
       grammarLoading={grammarLoading}
       grammarExercises={grammarExercises}
