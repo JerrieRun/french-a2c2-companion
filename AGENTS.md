@@ -26,17 +26,19 @@
 - `src/components/WritingPractice.tsx` — 写作批改（DeepSeek）
 - `src/components/ListeningPractice.tsx` — 听力跟读（浏览器 speechSynthesis，fr-FR，免 API）
 - `src/components/` — 单元摘要/词汇/练习卡片（纯展示组件）
-- `src/lib/deepseek.ts` — DeepSeek 纯函数层（prompt/URL/API 调用/JSON 容错）
+- `src/lib/deepseek.ts` — DeepSeek 纯函数层（prompt/URL/API 调用/JSON 容错，含 `buildUnitModulePrompt` 单元学习卡生成）
+- `src/lib/storage.ts` — 本地保存：PDF 入 IndexedDB（`french-companion`）、解析结果入 localStorage（`french-preview`），启动自动恢复
+- `src/components/UnitStudyModule.tsx` — 单元详细学习卡（分类词汇/语法精华/常见错误/中法例句）
 - `src/types.ts` — 全局类型定义
 - `src/index.css` + `tailwind.config.js` — 暖色主题；自定义色：cream #fff5d6、lavender、blush、sky、coral #ff8966、warm；闪卡翻转动画类 `flashcard-*`
 - `sample.pdf` — 测试用教材样本
 
 ## 核心实现约定
 - 三个 Tab：`learn`（通用学习）/ `materials`（教材中心）/ `progress`（进度复盘），默认 `materials`
-- 主流程：上传 PDF → 提取文本 → 拆单元（`buildLocalUnitsFromText`）→ 提取词频候选（`extractWordCandidates`）→ 用户选句 → DeepSeek 分析/出题
+- 主流程：上传 PDF → 提取文本 → 拆单元（`parsePdfUnits`）→ 提取词频候选（`extractWordCandidates`）→ 用户选句 → DeepSeek 分析/出题；上传后自动保存到本地（IndexedDB + localStorage），启动时自动恢复
 - DeepSeek 支持三种调用方式：官方直连（`api.deepseek.com/chat/completions`）、自定义代理端点（`/parse` `/analyze` `/practice`）、纯本地降级；配置可存 localStorage
 - 分析结果须为合法 JSON；用 `extractJson` 做容错解析
-- 持久化 key：`french-word-book`、`french-analysis-history`、`french-flashcard-mastery`（闪卡熟练度 0-5）、`french-path-progress`（课时完成）、`deepseek-*`
+- 持久化 key：`french-word-book`、`french-analysis-history`、`french-flashcard-mastery`（闪卡熟练度 0-5）、`french-path-progress`（课时完成）、`french-preview`（教材解析结果）、IndexedDB `french-companion`（PDF 文件）、`deepseek-*`
 
 ## 当前已知问题 / 技术债（详见 TODO.md）
 1. `App.tsx` 仍有 ~860 行（逻辑+状态集中），可进一步拆分 hooks/业务层

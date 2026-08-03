@@ -3,8 +3,9 @@ import './App.css';
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.js?url';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { UnitPracticeCard } from './components/UnitPracticeCard';
-import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildDeepSeekUrl,
+import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitModulePrompt, buildDeepSeekUrl,
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
+import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview } from './lib/storage';
 import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, TabKey, UnitSection, WordCandidate } from './types';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
@@ -96,6 +97,8 @@ function App() {
   const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>([]);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [unitModuleLoading, setUnitModuleLoading] = useState<number | null>(null);
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const savedUrl = window.localStorage.getItem('deepseek-api-url');
@@ -138,7 +141,12 @@ function App() {
         console.warn('加载分析历史失败：', error);
       }
     }
+    void restoreSavedMaterial();
   }, []);
+
+  useEffect(() => {
+    if (materialPreview) savePreview(materialPreview);
+  }, [materialPreview]);
 
   useEffect(() => {
     window.localStorage.setItem('french-word-book', JSON.stringify(wordBook));
@@ -161,6 +169,26 @@ function App() {
     window.localStorage.setItem('deepseek-official-url', deepSeekOfficialUrl);
   }, [deepSeekApiUrl, deepSeekParseUrl, deepSeekAnalyzeUrl, deepSeekPracticeUrl, deepSeekApiKey, deepSeekModel, deepSeekOfficialUrl]);
 
+  /** 启动时恢复上次上传并保存的教材（IndexedDB 存 PDF + localStorage 存解析结果），无需重新上传 */
+  const restoreSavedMaterial = async () => {
+    try {
+      const saved = await loadPdfFile();
+      const preview = loadPreview();
+      if (!saved || !preview) return;
+      const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist/legacy/build/pdf');
+      GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+      const pdf = await getDocument({ data: saved.data }).promise;
+      setPdfName(saved.name);
+      setPdfDoc(pdf);
+      setMaterialPreview(preview);
+      setSelectedUnitIndex(0);
+      setCandidateWords(extractWordCandidates(preview.units.map(u => u.sentences.join(' ')).join(' ')));
+      setRestoreNotice(`✅ 已自动恢复上次上传的教材《${saved.name}》，无需重新上传。`);
+    } catch (e) {
+      console.warn('恢复已保存教材失败：', e);
+    }
+  };
+
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -179,6 +207,8 @@ function App() {
 
     try {
       const arrayBuffer = await file.arrayBuffer();
+      // pdfjs 可能 detach 原始 buffer，先复制一份用于本地保存
+      const pdfStorageCopy = arrayBuffer.slice(0);
       const { fullText, pages, pdfDoc } = await extractTextFromPdf(arrayBuffer);
       const preview = buildMaterialPreview(fullText);
       const units = await parsePdfUnits(fullText);
@@ -186,11 +216,20 @@ function App() {
       const candidates = extractWordCandidates(fullText);
       setPdfDoc(pdfDoc);
       setPdfPages(pages);
-      setMaterialPreview({ ...preview, units: unitsWithPages });
+      const fullPreview = { ...preview, units: unitsWithPages };
+      setMaterialPreview(fullPreview);
       setSelectedUnitIndex(0);
       setPdfTargetPage(unitsWithPages[0]?.startPage ?? null);
       setPdfJumpSignal(signal => signal + 1);
       setCandidateWords(candidates);
+      try {
+        // 保存到本地：PDF 入 IndexedDB、解析结果入 localStorage，之后无需重新上传
+        await savePdfFile(file.name, pdfStorageCopy);
+        savePreview(fullPreview);
+        setRestoreNotice(`✅ 教材《${file.name}》已保存在本项目中，下次打开自动恢复，无需重新上传。`);
+      } catch (saveErr) {
+        console.warn('保存教材到本地失败：', saveErr);
+      }
     } catch (e) {
       console.error('PDF 提取失败：', e);
       const message = e instanceof Error ? e.message : String(e);
@@ -770,6 +809,89 @@ function App() {
     setActiveTab('learn');
   };
 
+  /** 生成单个单元的「详细学习卡」（分类词汇/语法精华/常见错误/中法例句），结果合并进 materialPreview */
+  const generateUnitModule = async (unitIndex: number) => {
+    const unit = materialPreview?.units[unitIndex];
+    if (!unit) return;
+    if (unit.vocabGroups || unit.grammarTopics || unit.exampleSentences) return;
+    setUnitModuleLoading(unitIndex);
+    try {
+      if (!deepSeekApiKey) {
+        // 无 API Key：本地兜底，仅生成词汇分组
+        setMaterialPreview(prev => prev ? {
+          ...prev,
+          units: prev.units.map((u, i) => i === unitIndex ? ({
+            ...u,
+            vocabGroups: u.vocabulary.length ? [{ category: '本单元核心词汇', items: u.vocabulary.map(v => ({ word: v.text, translation: v.translation })) }] : [],
+          }) : u),
+        } : prev);
+        return;
+      }
+      const content = await callDeepSeekChat(
+        { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+        '你是一位资深法语教师（CEFR A2→C2），负责为教材单元生成详细学习卡，讲解用中文。',
+        buildUnitModulePrompt(unit.title, unit.summary, unit.sentences),
+        8192
+      );
+      const data = extractJson(content);
+      const norm = (arr: unknown) => (Array.isArray(arr) ? arr : []);
+      setMaterialPreview(prev => prev ? {
+        ...prev,
+        units: prev.units.map((u, i) => i === unitIndex ? ({
+          ...u,
+          vocabGroups: norm(data?.vocabGroups).map((g: any) => ({
+            category: String(g?.category ?? ''),
+            items: norm(g?.items).map((it: any) => ({
+              word: String(it?.word ?? ''),
+              translation: String(it?.translation ?? ''),
+              example: it?.example ? String(it.example) : undefined,
+            })).filter((it: { word: string }) => it.word),
+          })).filter((g: { category: string; items: unknown[] }) => g.category && g.items.length),
+          grammarTopics: norm(data?.grammarTopics).map((t: any) => ({
+            title: String(t?.title ?? ''),
+            explanation: String(t?.explanation ?? ''),
+            table: Array.isArray(t?.table) && t.table.length > 1 ? t.table.map((row: unknown) => Array.isArray(row) ? row.map((c: unknown) => String(c ?? '')) : []) : undefined,
+          })).filter((t: { title: string }) => t.title),
+          commonMistakes: norm(data?.commonMistakes).map((m: any) => ({
+            wrong: String(m?.wrong ?? ''),
+            right: String(m?.right ?? ''),
+            note: m?.note ? String(m.note) : undefined,
+          })).filter((m: { wrong: string; right: string }) => m.wrong && m.right),
+          exampleSentences: norm(data?.exampleSentences).map((s: any) => ({
+            zh: String(s?.zh ?? ''),
+            fr: String(s?.fr ?? ''),
+          })).filter((s: { zh: string; fr: string }) => s.zh && s.fr),
+        }) : u),
+      } : prev);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setMaterialPreview(prev => prev ? {
+        ...prev,
+        units: prev.units.map((u, i) => i === unitIndex ? ({
+          ...u,
+          exampleSentences: [{ zh: '⚠️ 生成失败', fr: message }],
+        }) : u),
+      } : prev);
+    } finally {
+      setUnitModuleLoading(null);
+    }
+  };
+
+  /** 清除本地保存的教材（PDF + 解析结果），恢复为空状态 */
+  const handleClearSavedMaterial = async () => {
+    try {
+      await clearPdfFile();
+      clearPreview();
+    } catch (e) {
+      console.warn('清除本地教材失败：', e);
+    }
+    setPdfName(null);
+    setPdfDoc(null);
+    setMaterialPreview(null);
+    setCandidateWords([]);
+    setRestoreNotice(null);
+  };
+
   const deepSeekModeLabel = useMemo(() => {
     const hasCustom =
       resolveCustomEndpoint(deepSeekParseUrl, deepSeekApiUrl) ||
@@ -1132,6 +1254,8 @@ function App() {
       onWritingPrompt={handleWritingPromptFromPath}
       onGoMaterials={() => setActiveTab('materials')}
       onGoLearn={() => setActiveTab('learn')}
+      onGenerateUnitModule={generateUnitModule}
+      unitModuleLoading={unitModuleLoading}
     />
   )}
 
@@ -1211,6 +1335,11 @@ function App() {
       handleSentenceSelect={ handleSentenceSelect }
       handleAddToWordBook={ handleAddToWordBook }
       handleAnalyzeSentence={ handleAnalyzeSentence }
+      onGenerateUnitModule={ generateUnitModule }
+      unitModuleLoading={ unitModuleLoading }
+      restoreNotice={ restoreNotice }
+      onDismissRestoreNotice={ () => setRestoreNotice(null) }
+      onClearSavedMaterial={ handleClearSavedMaterial }
       handleGeneratePractice={ handleGeneratePractice }
       testDeepSeekConnection={ testDeepSeekConnection }
       translateSentence={ translateSentence }

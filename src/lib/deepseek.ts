@@ -18,6 +18,42 @@ export const buildParsePrompt = (text: string) => {
   return `System: 你是一个法语高级教育助手，负责读取法语教材并按单元拆分结构化内容。请输出每个单元的标题、摘要、核心词汇与示例练习题，结构化为 JSON。\n\n文本：${text}`;
 };
 
+/** 生成单个单元的「详细学习卡」：分类词汇 + 语法精华 + 常见错误 + 中法例句 */
+export const buildUnitModulePrompt = (unitTitle: string, summary: string, sentences: string[]) => {
+  const excerpt = sentences.slice(0, 6).join('\n');
+  return `System: 你是一位资深法语教师（CEFR A2→C2），请为教材单元生成一份「详细学习卡」，严格输出合法 JSON（不要用 markdown 代码块包裹）。
+
+格式：
+{
+  "vocabGroups": [
+    { "category": "分类名（如：环保与可持续）", "items": [
+      { "word": "法语词/词组", "translation": "中文释义", "example": "含该词的简短法语句子（可选）" }
+    ] }
+  ],
+  "grammarTopics": [
+    { "title": "语法点名称（如：虚拟式构成）", "explanation": "中文讲解，含规则/构成/用法/例句", "table": [["列名1","列名2"],["单元格","单元格"]] }
+  ],
+  "commonMistakes": [
+    { "wrong": "错误法语句子", "right": "正确法语句子", "note": "中文说明错在哪" }
+  ],
+  "exampleSentences": [
+    { "zh": "中文句", "fr": "对应法语句" }
+  ]
+}
+
+要求：
+1. 词汇按主题分类（3-6 类），每类 4-8 个词条，优先从本单元真实课文里选词，生词必须给中文释义。
+2. 语法 2-4 个主题，讲解要详细、可操作，能用表格就用表格（表格首行为表头）。
+3. 常见错误 3-5 条，来自本单元最易错的点。
+4. 例句 10 句，中法对照，覆盖本单元核心词汇与语法。
+5. 所有讲解用中文，例句必须真实自然、符合 CEFR 等级。
+
+单元标题：${unitTitle}
+单元摘要：${summary}
+单元课文句子（节选）：
+${excerpt}`;
+};
+
 export const buildDeepSeekUrl = (endpoint: string, suffix: string) => {
   const trimmed = endpoint.trim();
   if (!trimmed) {

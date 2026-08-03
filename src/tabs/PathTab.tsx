@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { MaterialPreview, PathProgress } from '../types';
+import { UnitStudyModule } from '../components/UnitStudyModule';
 
 const STORAGE_KEY = 'french-path-progress';
 
@@ -27,6 +28,8 @@ type PathTabProps = {
   onWritingPrompt: (prompt: string) => void;
   onGoMaterials: () => void;
   onGoLearn: () => void;
+  onGenerateUnitModule: (unitIndex: number) => Promise<void>;
+  unitModuleLoading: number | null;
 };
 
 /** 从教材文件名推断 CEFR 等级，缺省 B2 */
@@ -50,9 +53,12 @@ export function PathTab({
   onWritingPrompt,
   onGoMaterials,
   onGoLearn,
+  onGenerateUnitModule,
+  unitModuleLoading,
 }: PathTabProps) {
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [dialog, setDialog] = useState<{ unit: number; lesson: number } | null>(null);
+  const [expandedModule, setExpandedModule] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [progress, setProgress] = useState<PathProgress>(() => {
     try {
@@ -274,10 +280,36 @@ export function PathTab({
 
       {course.units.map((unit, uIdx) => (
         <div key={uIdx} className="rounded-[28px] border border-slate-200 bg-white/90 p-6 shadow-sm">
-          <h4 className="text-lg font-semibold text-slate-900">
-            Unité {uIdx}: {unit.title}
-          </h4>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h4 className="text-lg font-semibold text-slate-900">
+              Unité {uIdx}: {unit.title}
+            </h4>
+            <button
+              type="button"
+              onClick={() => {
+                const next = expandedModule === uIdx ? null : uIdx;
+                setExpandedModule(next);
+                if (next !== null && !unit.vocabGroups && !unit.grammarTopics && !unit.exampleSentences && unitModuleLoading !== uIdx) {
+                  void onGenerateUnitModule(uIdx);
+                }
+              }}
+              className={`rounded-2xl px-3.5 py-2 text-xs font-semibold transition ${
+                expandedModule === uIdx ? 'bg-coral text-white' : 'bg-lavender/50 text-slate-700 hover:bg-lavender'
+              }`}
+            >
+              {expandedModule === uIdx ? '收起学习卡 ▲' : '📖 详细学习卡'}
+            </button>
+          </div>
           <p className="mt-1 text-sm text-slate-500">{unit.summary || unit.excerpt?.slice(0, 80) || '本单元学习内容'}</p>
+          {expandedModule === uIdx && (
+            <div className="mt-4 rounded-[28px] border border-slate-200 bg-white/80 p-5">
+              <UnitStudyModule
+                unit={unit}
+                loading={unitModuleLoading === uIdx}
+                onGenerate={() => void onGenerateUnitModule(uIdx)}
+              />
+            </div>
+          )}
           <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
             {LESSONS.map((lesson, lIdx) => {
               const done = !!progress[`${uIdx}:${lIdx}`];
