@@ -1,4 +1,7 @@
-export type TabKey = 'learn' | 'materials' | 'progress';
+export type TabKey = 'learn' | 'materials' | 'path' | 'progress';
+
+/** 学习路径课时完成进度：key 为 `${单元索引}:${课时索引}` */
+export type PathProgress = Record<string, boolean>;
 
 export type UnitSection = {
   title: string;

@@ -7,6 +7,7 @@ import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildDeepSe
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
 import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, TabKey, UnitSection, WordCandidate } from './types';
 import { LearnTab } from './tabs/LearnTab';
+import { PathTab } from './tabs/PathTab';
 
 /** 无 DeepSeek Key 时的离线语法练习兜底 */
 const STATIC_GRAMMAR: Record<string, GrammarExercise[]> = {
@@ -267,28 +268,55 @@ function App() {
       }
     });
 
+    // 目录/索引页：页内出现大量 "p. XX" 引用（教材正文页通常为 0），匹配时需跳过
+    const tocPages = new Set<number>();
+    normPages.forEach((pageText, index) => {
+      const refs = (pageText.match(/p\.\s*\d+/g) || []).length;
+      if (refs >= 5) tocPages.add(index + 1);
+    });
+
     let searchFrom = 0;
     let prevStartPage = 1;
     return units.map(unit => {
-      // ① 精确匹配：只用句子，避免标题命中目录/封面造成误跳
+      // ① 精确匹配：只用句子（统一小写 + 弯引号归一，兼容 DeepSeek 改写）；命中目录/索引页时继续向后找正文页
       let startPage = -1;
       for (const sentence of unit.sentences.slice(0, 3)) {
-        const key = sentence.replace(/\s+/g, ' ').trim();
+        const key = sentence.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[’‘]/g, "'");
         if (key.length < 8) continue;
-        const idx = normFull.indexOf(key, searchFrom);
-        if (idx >= 0) {
-          startPage = pageForOffset(idx);
-          searchFrom = idx + 1;
-          break;
+        let from = searchFrom;
+        for (;;) {
+          const idx = normFull.indexOf(key, from);
+          if (idx < 0) break;
+          const pg = pageForOffset(idx);
+          if (!tocPages.has(pg)) {
+            startPage = pg;
+            searchFrom = idx + 1;
+            break;
+          }
+          from = idx + 1;
         }
+        if (startPage >= 0) break;
       }
 
-      // ② 标题定位：取首次出现在非目录页的标题
+      // ② 标题定位：先按完整标题，再退而求其次去掉 "Unité N" 前缀用副标题关键词定位
       if (startPage < 0 && unit.title) {
         const key = unit.title.replace(/\s+/g, ' ').trim().toLowerCase().replace(/[’‘]/g, "'");
         const pagesList = titlePages.get(key) || [];
         const firstReal = pagesList.find(pg => pg > 0);
-        if (firstReal && firstReal > 0) startPage = firstReal;
+        if (firstReal && firstReal > 0) {
+          startPage = firstReal;
+        } else {
+          const subtitle = key.replace(/^unit[eé]\s*\d+\s*[:.\-–]?\s*/, '').trim();
+          if (subtitle.length >= 4) {
+            for (let p = 0; p < normPages.length; p += 1) {
+              if (tocPages.has(p + 1)) continue;
+              if (normPages[p].includes(subtitle)) {
+                startPage = p + 1;
+                break;
+              }
+            }
+          }
+        }
       }
 
       const finalPage = startPage > 0 ? startPage : prevStartPage;
@@ -686,6 +714,44 @@ function App() {
     }
   };
 
+  /** 课程路径：课时「课文精读」→ 切到教材中心并跳转 PDF 到单元起始页 */
+  const handleOpenUnitFromPath = (index: number) => {
+    setSelectedUnitIndex(index);
+    setSelectedSentenceIndex(null);
+    setAnalysisResult(null);
+    setAnalysisPrompt(null);
+    setPracticeExercises([]);
+    setPracticePrompt(null);
+    const unit = materialPreview?.units[index];
+    if (unit?.startPage) {
+      setPdfTargetPage(unit.startPage);
+      setPdfJumpSignal(signal => signal + 1);
+    }
+    setActiveTab('materials');
+  };
+
+  /** 课程路径：课时「语法要点」→ 切到通用学习并生成对应等级/单元语法题 */
+  const handleStartGrammarFromPath = (level: string, topic: string) => {
+    setActiveTab('learn');
+    void runGrammarExercise(level, topic);
+  };
+
+  /** 课程路径：课时「核心词汇」→ 把单元词汇并入生词本（去重），返回新增数量 */
+  const handleAddUnitWordsFromPath = (unitIndex: number): number => {
+    const unit = materialPreview?.units[unitIndex];
+    if (!unit?.vocabulary?.length) return 0;
+    const existing = new Set(wordBook.map(w => w.text));
+    const fresh = unit.vocabulary.filter(w => w.text && !existing.has(w.text));
+    if (fresh.length) {
+      setWordBook(prev => {
+        const prevSet = new Set(prev.map(w => w.text));
+        const toAdd = fresh.filter(w => !prevSet.has(w.text));
+        return [...prev, ...toAdd];
+      });
+    }
+    return fresh.length;
+  };
+
   const deepSeekModeLabel = useMemo(() => {
     const hasCustom =
       resolveCustomEndpoint(deepSeekParseUrl, deepSeekApiUrl) ||
@@ -970,6 +1036,14 @@ function App() {
         <nav className="mt-8 flex flex-col gap-4 rounded-[28px] border border-slate-200 bg-white/90 p-4 shadow-[0_20px_60px_rgba(0,0,0,0.05)] md:flex-row md:justify-between md:items-center">
           <div className="flex flex-wrap gap-3">
             <button
+              onClick={() => setActiveTab('path')}
+              className={`rounded-2xl px-4 py-3 text-sm font-semibold transition shadow-sm ${
+                activeTab === 'path' ? 'bg-gradient-to-r from-warm to-coral text-white shadow-warm/25' : 'bg-white text-slate-700 hover:bg-cream'
+              }`}
+            >
+              🗺️ 课程路径
+            </button>
+            <button
               onClick={() => setActiveTab('learn')}
               className={`rounded-2xl px-4 py-3 text-sm font-semibold transition shadow-sm ${
                 activeTab === 'learn' ? 'bg-gradient-to-r from-warm to-coral text-white shadow-warm/25' : 'bg-white text-slate-700 hover:bg-cream'
@@ -1024,10 +1098,22 @@ function App() {
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-sm font-medium text-coral">你好，法语学习者</p>
-                  <h2 className="mt-2 text-3xl font-semibold text-slate-900">{activeTab === 'learn' ? '通用学习系统' : activeTab === 'materials' ? '教材深度辅助' : '学习进度'}</h2>
+                  <h2 className="mt-2 text-3xl font-semibold text-slate-900">{activeTab === 'path' ? '分级课程路径' : activeTab === 'learn' ? '通用学习系统' : activeTab === 'materials' ? '教材深度辅助' : '学习进度'}</h2>
                 </div>
-                <div className="rounded-3xl bg-sky/80 px-5 py-3 text-slate-900">{activeTab === 'learn' ? '🧠 进阶学习' : activeTab === 'materials' ? '📚 教材解析' : '📈 数据可视'}</div>
+                <div className="rounded-3xl bg-sky/80 px-5 py-3 text-slate-900">{activeTab === 'path' ? '🗺️ 分级课程' : activeTab === 'learn' ? '🧠 进阶学习' : activeTab === 'materials' ? '📚 教材解析' : '📈 数据可视'}</div>
               </div>
+
+{activeTab === 'path' && (
+    <PathTab
+      materialPreview={materialPreview}
+      pdfName={pdfName}
+      onOpenUnitInPdf={handleOpenUnitFromPath}
+      onStartGrammar={handleStartGrammarFromPath}
+      onAddUnitWords={handleAddUnitWordsFromPath}
+      onGoMaterials={() => setActiveTab('materials')}
+      onGoLearn={() => setActiveTab('learn')}
+    />
+  )}
 
 {activeTab === 'learn' && (
     <LearnTab

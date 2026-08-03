@@ -129,8 +129,25 @@ export function PdfViewer(props: PdfViewerProps) {
   // 单元被选中时自动跳到对应 PDF 页
   useEffect(() => {
     if (!pdfDoc || targetPage == null) return;
-    const el = containerRef.current?.querySelector<HTMLElement>(`[data-page="${targetPage}"]`);
-    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    let cancelled = false;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = containerRef.current?.querySelector<HTMLElement>(`[data-page="${targetPage}"]`);
+      if (el) {
+        const canvas = el.querySelector('canvas');
+        // 等待目标页渲染出实际高度后再滚动，避免在 canvas 高度为 0 时空转（最多等约 5 秒）
+        const ready = !canvas || !!canvas.style.height || attempts > 20;
+        if (ready) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+      }
+      attempts += 1;
+      setTimeout(tryScroll, 250);
+    };
+    tryScroll();
+    return () => { cancelled = true; };
   }, [pdfDoc, targetPage, jumpSignal]);
 
   // 计算工具条位置

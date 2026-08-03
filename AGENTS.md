@@ -18,6 +18,7 @@
 ## 目录结构
 - `src/App.tsx` — 根组件（~860 行）：全局状态 + 业务逻辑 + Tab 路由
 - `src/tabs/LearnTab.tsx` — 学习 Tab：单词闪卡、语法练习、写作批改、听力跟读（2 列网格）
+- `src/tabs/PathTab.tsx` — 课程路径 Tab：CEFR 分级课程卡 → 单元 → 课时（精读/词汇/跟读/语法），课时解锁门槛 + 进度持久化（localStorage `french-path-progress`）
 - `src/tabs/MaterialsTab.tsx` — 教材中心 Tab（解析、选句分析、DeepSeek 配置、生词收藏）
 - `src/tabs/ProgressTab.tsx` — 进度复盘 Tab
 - `src/components/FlashcardDeck.tsx` — 单词闪卡组件（翻面动画、认识/再练、熟练度）
@@ -35,7 +36,7 @@
 - 主流程：上传 PDF → 提取文本 → 拆单元（`buildLocalUnitsFromText`）→ 提取词频候选（`extractWordCandidates`）→ 用户选句 → DeepSeek 分析/出题
 - DeepSeek 支持三种调用方式：官方直连（`api.deepseek.com/chat/completions`）、自定义代理端点（`/parse` `/analyze` `/practice`）、纯本地降级；配置可存 localStorage
 - 分析结果须为合法 JSON；用 `extractJson` 做容错解析
-- 持久化 key：`french-word-book`、`french-analysis-history`、`french-flashcard-mastery`（闪卡熟练度 0-5）、`deepseek-*`
+- 持久化 key：`french-word-book`、`french-analysis-history`、`french-flashcard-mastery`（闪卡熟练度 0-5）、`french-path-progress`（课时完成）、`deepseek-*`
 
 ## 当前已知问题 / 技术债（详见 TODO.md）
 1. `App.tsx` 仍有 ~860 行（逻辑+状态集中），可进一步拆分 hooks/业务层
