@@ -5,8 +5,39 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { UnitPracticeCard } from './components/UnitPracticeCard';
 import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildDeepSeekUrl,
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
-import type { AnalysisRecord, AnalysisResult, MaterialPreview, TabKey, UnitSection, WordCandidate } from './types';
+import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, TabKey, UnitSection, WordCandidate } from './types';
 import { LearnTab } from './tabs/LearnTab';
+
+/** 无 DeepSeek Key 时的离线语法练习兜底 */
+const STATIC_GRAMMAR: Record<string, GrammarExercise[]> = {
+  A2: [
+    { question: 'Hier, je ___ (manger) une pizza.（用复合过去时填空）', answer: "j'ai mangé" },
+    { question: 'Tu veux du thé ? ___ tu veux un café ?（用 est-ce que 提问）', answer: 'Est-ce que' },
+    { question: 'Ce livre est ___ (intéressant) que celui-là.（比较级）', answer: 'plus intéressant' },
+  ],
+  B1: [
+    { question: "Si j'avais le temps, je ___ (voyager) plus.（条件式现在时）", answer: 'voyagerais' },
+    { question: "Il faut que tu ___ (faire) tes devoirs.（虚拟式）", answer: 'fasses' },
+    { question: 'La femme ___ habite ici est médecin.（关系代词）', answer: 'qui' },
+  ],
+  B2: [
+    { question: "Je doute qu'il ___ (venir) demain.（虚拟式）", answer: 'vienne' },
+    { question: 'Ce projet ___ (construire) par une équipe jeune.（被动语态）', answer: 'a été construit' },
+    { question: "Il m'a dit qu'il ___ (être) en retard.（间接引语）", answer: 'était / avait été' },
+  ],
+  C1: [
+    { question: 'Il ___ (pleuvoir) depuis trois jours quand nous sommes arrivés.（愈过去时）', answer: 'avait plu' },
+    { question: 'Bien que ___ (être) fatigué, il a continué.（省略句）', answer: 'fatigué' },
+    { question: "Sans ton aide, je n'___ pas ___ (réussir).（条件式过去时）", answer: 'aurais pas réussi' },
+  ],
+  C2: [
+    { question: "Traduisez : « Il n'y a pas de fumée sans feu. »（习语）", answer: "无风不起浪" },
+    { question: 'Transformez au registre soutenu : « Il est super fort en maths. »', answer: 'Il excelle en mathématiques.' },
+    { question: "Faites l'hypothèse : S'il avait écouté mes conseils, il ___ (éviter) cette erreur.", answer: 'aurait évité' },
+  ],
+};
+
+
 import { MaterialsTab } from './tabs/MaterialsTab';
 import { ProgressTab } from './tabs/ProgressTab';
 import { UnitSummaryCard } from './components/UnitSummaryCard';
@@ -28,6 +59,10 @@ function App() {
   const [candidateWords, setCandidateWords] = useState<WordCandidate[]>([]);
   const [wordBook, setWordBook] = useState<WordCandidate[]>([]);
   const [flashcardMastery, setFlashcardMastery] = useState<Record<string, number>>({});
+  const [writingResult, setWritingResult] = useState<string | null>(null);
+  const [writingLoading, setWritingLoading] = useState(false);
+  const [grammarExercises, setGrammarExercises] = useState<GrammarExercise[] | null>(null);
+  const [grammarLoading, setGrammarLoading] = useState(false);
   const [selectedUnitIndex, setSelectedUnitIndex] = useState<number>(0);
   const [selectedSentenceIndex, setSelectedSentenceIndex] = useState<number | null>(null);
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
@@ -828,6 +863,57 @@ function App() {
     });
   };
 
+  const runWritingCorrection = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setWritingLoading(true);
+    setWritingResult(null);
+    try {
+      if (deepSeekApiKey) {
+        const content = await callDeepSeekChat({ apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+          '你是一位法语写作老师。请批改用户的法语作文：先给整体评价，再逐条列出错误（原文 → 修改 → 原因），最后给出改进建议。用中文解释。',
+          trimmed,
+          2048
+        );
+        setWritingResult(content.trim());
+      } else {
+        setWritingResult('⚠️ 当前未配置 DeepSeek API Key。可在「教材中心 → DeepSeek 配置」中填写后获得专业批改（语法、用词、表达建议）。');
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setWritingResult(`批改失败：${message}`);
+    } finally {
+      setWritingLoading(false);
+    }
+  };
+
+  const runGrammarExercise = async (level: string, topic: string) => {
+    setGrammarLoading(true);
+    setGrammarExercises(null);
+    try {
+      if (deepSeekApiKey) {
+        const content = await callDeepSeekChat({ apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+          `你是一位法语语法老师。请针对 CEFR ${level} 级别、主题「${topic}」，生成 3 道法语练习题（中文题干，留空作答）。严格输出合法 JSON（不要用 markdown 代码块包裹），格式为：{"questions":[{"question":"题目","answer":"参考答案"}]}。`,
+          `级别：${level}，主题：${topic}`,
+          2048
+        );
+        const data = extractJson(content);
+        const questions = Array.isArray(data?.questions) ? data.questions : [];
+        setGrammarExercises(questions.slice(0, 5).map((q: any) => ({
+          question: String(q?.question ?? ''),
+          answer: String(q?.answer ?? ''),
+        })));
+      } else {
+        setGrammarExercises(STATIC_GRAMMAR[level] || []);
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setGrammarExercises([{ question: `生成失败：${message}（可在「教材中心 → DeepSeek 配置」填写 API Key）`, answer: '' }]);
+    } finally {
+      setGrammarLoading(false);
+    }
+  };
+
   const handleFlashcardMasteryChange = (word: string, delta: number) => {
     setFlashcardMastery(prev => {
       const current = prev[word] ?? 0;
@@ -948,6 +1034,12 @@ function App() {
       wordBook={wordBook}
       flashcardMastery={flashcardMastery}
       onFlashcardMasteryChange={handleFlashcardMasteryChange}
+      writingLoading={writingLoading}
+      writingResult={writingResult}
+      onWritingCorrection={runWritingCorrection}
+      grammarLoading={grammarLoading}
+      grammarExercises={grammarExercises}
+      onGrammarGenerate={runGrammarExercise}
     />
   )}
 

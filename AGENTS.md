@@ -17,10 +17,13 @@
 
 ## 目录结构
 - `src/App.tsx` — 根组件（~860 行）：全局状态 + 业务逻辑 + Tab 路由
-- `src/tabs/LearnTab.tsx` — 学习 Tab：单词闪卡 + 语法专题 + 听力写作
+- `src/tabs/LearnTab.tsx` — 学习 Tab：单词闪卡、语法练习、写作批改、听力跟读（2 列网格）
 - `src/tabs/MaterialsTab.tsx` — 教材中心 Tab（解析、选句分析、DeepSeek 配置、生词收藏）
 - `src/tabs/ProgressTab.tsx` — 进度复盘 Tab
 - `src/components/FlashcardDeck.tsx` — 单词闪卡组件（翻面动画、认识/再练、熟练度）
+- `src/components/GrammarPractice.tsx` — 语法练习（DeepSeek 生成 / 无 Key 时用 STATIC_GRAMMAR 离线题库）
+- `src/components/WritingPractice.tsx` — 写作批改（DeepSeek）
+- `src/components/ListeningPractice.tsx` — 听力跟读（浏览器 speechSynthesis，fr-FR，免 API）
 - `src/components/` — 单元摘要/词汇/练习卡片（纯展示组件）
 - `src/lib/deepseek.ts` — DeepSeek 纯函数层（prompt/URL/API 调用/JSON 容错）
 - `src/types.ts` — 全局类型定义

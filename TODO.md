@@ -18,6 +18,7 @@
   - [x] 三个 Tab → `src/tabs/LearnTab.tsx` / `MaterialsTab.tsx` / `ProgressTab.tsx`
 - [ ] 2. git 基线提交 — 文档已就绪，**需用户在终端执行**：`git init && git add -A && git commit -m "基线"`（Codex 沙箱禁止创建 .git）
 - [x] 3. 学习 Tab 单词闪卡（2026-08-02：FlashcardDeck + 熟练度持久化）
+- [x] 4. 通用学习系统完成（2026-08-03）：语法练习（DeepSeek 生成+离线题库）、写作批改（DeepSeek）、听力跟读（Web Speech API）
 - [ ] 4. 登录与云端存储（Supabase）——README 规划中的方向
 - [ ] 5. 自动测试（Vitest）
 

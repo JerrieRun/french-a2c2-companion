@@ -38,6 +38,11 @@ export type AnalysisResult = {
   };
 };
 
+export type GrammarExercise = {
+  question: string;
+  answer: string;
+};
+
 export type AnalysisRecord = {
   sentence: string;
   summary: string;
