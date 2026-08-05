@@ -1,9 +1,7 @@
 import type { ChangeEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { PdfViewer } from '../components/PdfViewer';
-import { UnitPracticeCard } from '../components/UnitPracticeCard';
 import { UnitSummaryCard } from '../components/UnitSummaryCard';
-import { UnitVocabularyCard } from '../components/UnitVocabularyCard';
 import { UnitStudyModule } from '../components/UnitStudyModule';
 import type { AnalysisResult, MaterialPreview, UnitSection, WordCandidate } from '../types';
 
@@ -88,8 +86,8 @@ export function MaterialsTab(props: MaterialsTabProps) {
   const {
     pdfName, error, loading, parseMethod, parseMode, setParseMode,
     materialPreview, selectedUnit, selectedUnitIndex,
-    displayedSentences, sentenceCount, selectedSentence, selectedSentenceIndex,
-    candidateWords, wordBook, deepSeekStudyPlan, deepSeekModeLabel,
+    sentenceCount, selectedSentence,
+    wordBook, deepSeekStudyPlan, deepSeekModeLabel,
     analysisResult, analysisPrompt, practiceExercises, practicePrompt,
     deepSeekParsePrompt, deepSeekParseResponse, deepSeekTestStatus, deepSeekTesting,
     deepSeekApiKey, setDeepSeekApiKey, deepSeekModel, setDeepSeekModel,
@@ -97,7 +95,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     deepSeekParseUrl, setDeepSeekParseUrl, deepSeekAnalyzeUrl, setDeepSeekAnalyzeUrl,
     deepSeekPracticeUrl, setDeepSeekPracticeUrl, deepSeekConfigSaved, setDeepSeekConfigSaved,
     deepSeekConfigOpen, setDeepSeekConfigOpen,
-    handleFileChange, handleUnitSelect, handleSentenceSelect, handleAddToWordBook,
+    handleFileChange, handleUnitSelect,
     handleAnalyzeSentence, handleGeneratePractice, testDeepSeekConnection, translateSentence,
     pdfDoc, pdfTargetPage, pdfJumpSignal,
     onTranslateText, onAnalyzeText, onWordDetail, onAddWord,
@@ -331,8 +329,8 @@ export function MaterialsTab(props: MaterialsTabProps) {
 
   {materialPreview && (
     <div className="rounded-[28px] bg-white p-6 shadow-sm">
-      <h3 className="text-xl font-semibold text-slate-900">教材句子与生词候选</h3>
-      <p className="mt-2 text-sm text-slate-600">从 PDF 中提取的关键句子和高频词汇，先预览词汇分级。</p>
+      <h3 className="text-xl font-semibold text-slate-900">教材单元</h3>
+      <p className="mt-2 text-sm text-slate-600">选择单元查看摘要与详细学习卡，或使用下方「单元目录」快速导航。</p>
       <div className="mt-5 space-y-5">
         {materialPreview.units.length > 1 && (
           <div className="grid gap-2 sm:grid-cols-3">
@@ -358,12 +356,9 @@ export function MaterialsTab(props: MaterialsTabProps) {
                 <p className="text-sm text-slate-500">当前单元</p>
                 <h4 className="mt-2 text-xl font-semibold text-slate-900">{selectedUnit.title}</h4>
               </div>
-              <span className="rounded-3xl bg-white px-4 py-2 text-sm text-slate-700">已选单元概览</span>
             </div>
-            <div className="mt-5 grid gap-4 lg:grid-cols-3">
+            <div className="mt-5">
               <UnitSummaryCard title={selectedUnit.title} summary={selectedUnit.summary} />
-              <UnitVocabularyCard vocabulary={selectedUnit.vocabulary} />
-              <UnitPracticeCard practice={selectedUnit.practice} />
             </div>
             <div className="mt-6 border-t border-slate-200 pt-5">
               <UnitStudyModule
@@ -374,48 +369,6 @@ export function MaterialsTab(props: MaterialsTabProps) {
             </div>
           </div>
         )}
-        <div>
-          <p className="text-sm font-medium text-slate-900">课文句子</p>
-          <div className="mt-3 grid gap-3 max-h-56 overflow-auto">
-            {displayedSentences.slice(0, 8).map((sentence, index) => (
-              <button
-                key={index}
-                type="button"
-                onClick={() => handleSentenceSelect(index)}
-                className={`w-full rounded-3xl border px-4 py-3 text-left text-sm transition ${
-                  selectedSentenceIndex === index ? 'border-coral bg-coral/10 text-slate-900' : 'border-slate-200 bg-cream text-slate-700 hover:border-coral/70'
-                }`}
-              >
-                <span className="font-medium">句子 {index + 1}：</span>
-                <span>{sentence}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <p className="text-sm font-medium text-slate-900">生词候选</p>
-          <div className="mt-3 grid gap-3">
-            {candidateWords.length ? candidateWords.map(word => (
-              <div key={word.text} className="rounded-3xl border border-slate-200 bg-cream p-4 text-sm text-slate-700">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <p className="font-semibold text-slate-900">{word.text}</p>
-                    <p className="mt-1 text-xs text-slate-500">{word.translation} · {word.cefr}</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleAddToWordBook(word)}
-                    className="rounded-2xl bg-coral px-3 py-1 text-xs font-semibold text-white"
-                  >
-                    收藏
-                  </button>
-                </div>
-              </div>
-            )) : (
-              <p className="rounded-3xl bg-slate-50 p-4 text-sm text-slate-500">暂无词汇候选。上传教材后自动生成。</p>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   )}
@@ -425,31 +378,65 @@ export function MaterialsTab(props: MaterialsTabProps) {
 <section className="mt-8 rounded-[32px] border border-slate-200 bg-white/90 p-8 shadow-[0_20px_60px_rgba(0,0,0,0.07)]">
   <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
     <div>
-      <h2 className="text-3xl font-semibold text-slate-900">教材结构分析</h2>
-      <p className="mt-2 text-sm text-slate-600">这是上传教材后的第一步展示。后续可扩展为逐句翻译、语法拆解与生词分级。</p>
+      <h2 className="text-3xl font-semibold text-slate-900">教材总览</h2>
+      <p className="mt-2 text-sm text-slate-600">教材结构概览：按单元导航学习，点击单元可查看详情并跳转 PDF 对应页。</p>
     </div>
     <div className="rounded-3xl bg-blush/80 px-5 py-3 text-slate-900">📄 {materialPreview.title}</div>
   </div>
-  <div className="mt-6 grid gap-6 lg:grid-cols-3">
+
+  <div className="mt-6 grid gap-4 sm:grid-cols-2">
     <div className="rounded-3xl bg-cream p-5">
-      <p className="text-sm text-slate-500">DeepSeek 拆分单元</p>
+      <p className="text-sm text-slate-500">单元数量</p>
       <p className="mt-3 text-3xl font-semibold text-slate-900">{materialPreview.units.length}</p>
     </div>
     <div className="rounded-3xl bg-cream p-5">
-      <p className="text-sm text-slate-500">文本摘录</p>
-      <p className="mt-3 text-slate-900 leading-7">{materialPreview.excerpt}</p>
+      <p className="text-sm text-slate-500">教材页数</p>
+      <p className="mt-3 text-3xl font-semibold text-slate-900">{materialPreview.pages}</p>
     </div>
-    <div className="rounded-3xl bg-cream p-5">
-      <p className="text-sm text-slate-500">学习方式</p>
-      <p className="mt-3 text-slate-700">按单元阅读、核心句法拆解、词汇造句、写作总结。</p>
+  </div>
+
+  <div className="mt-6 rounded-[28px] bg-white p-6 shadow-sm">
+    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <div>
+        <h3 className="text-xl font-semibold text-slate-900">单元目录</h3>
+        <p className="mt-1 text-sm text-slate-600">共 {materialPreview.units.length} 个单元，点击任意单元查看详情并跳转 PDF 对应页。</p>
+      </div>
+    </div>
+    <div className="mt-5 grid gap-4 lg:grid-cols-2">
+      {materialPreview.units.map((unit, index) => (
+        <button
+          key={`${unit.title}-${index}`}
+          type="button"
+          onClick={() => handleUnitSelect(index)}
+          className={`rounded-3xl border p-4 text-left transition ${
+            selectedUnitIndex === index ? 'border-coral bg-coral/10' : 'border-slate-200 bg-cream hover:border-coral/70'
+          }`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-500">单元 {index + 1}</span>
+            {unit.startPage ? <span className="text-xs text-slate-400">P{unit.startPage}</span> : null}
+          </div>
+          <p className="mt-3 text-base font-semibold text-slate-900">{unit.title}</p>
+          <p className="mt-2 line-clamp-2 text-sm leading-6 text-slate-600">{unit.summary || '暂无摘要，建议先阅读本单元原文。'}</p>
+          {unit.vocabulary.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {unit.vocabulary.slice(0, 5).map(word => (
+                <span key={word.text} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600">{word.text}</span>
+              ))}
+              {unit.vocabulary.length > 5 && <span className="text-xs text-slate-400">+{unit.vocabulary.length - 5}</span>}
+            </div>
+          )}
+          <p className="mt-3 text-xs text-slate-500">💡 本单元收录 {unit.vocabulary.length} 个核心词 · {unit.sentences.length} 句课文</p>
+        </button>
+      ))}
     </div>
   </div>
 
   <div className="mt-6 rounded-[28px] bg-white p-6 shadow-sm">
     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div>
-        <h3 className="text-xl font-semibold text-slate-900">DeepSeek 学习建议</h3>
-        <p className="mt-2 text-sm text-slate-600">基于拆分单元，这里是该教材的后续学习路径。</p>
+        <h3 className="text-xl font-semibold text-slate-900">学习建议</h3>
+        <p className="mt-2 text-sm text-slate-600">结合本教材拆分结果，推荐的完整学习流程。</p>
       </div>
       <div className="rounded-3xl bg-slate-100 px-4 py-2 text-sm text-slate-700">
         解析方式：{parseMethod}
@@ -460,45 +447,25 @@ export function MaterialsTab(props: MaterialsTabProps) {
         <p key={idx}>• {item}</p>
       ))}
     </div>
-
-    {deepSeekParsePrompt && (
-      <div className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
-        <p className="font-medium text-slate-900">DeepSeek 解析 Prompt</p>
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{deepSeekParsePrompt}</pre>
-      </div>
-    )}
-
-    {deepSeekParseResponse && (
-      <div className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 text-xs text-slate-600">
-        <p className="font-medium text-slate-900">DeepSeek 解析结果（JSON 预览）</p>
-        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{deepSeekParseResponse}</pre>
-      </div>
-    )}
   </div>
 
-  <div className="mt-6 rounded-[28px] bg-white p-6 shadow-sm">
-    <h3 className="text-xl font-semibold text-slate-900">DeepSeek 拆分单元预览</h3>
-    <p className="mt-2 text-sm text-slate-600">以下显示前几个解析到的单元标题与摘要，帮助你快速定位学习重点。</p>
-    <div className="mt-4 space-y-4">
-      {materialPreview.units.slice(0, 3).map((unit, idx) => (
-        <div key={idx} className="rounded-3xl border border-slate-200 bg-cream p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-slate-400">单元 {idx + 1}</p>
-          <p className="mt-2 text-lg font-semibold text-slate-900">{unit.title}</p>
-          <p className="mt-3 text-sm text-slate-700">{unit.summary || '暂无摘要内容，建议先阅读本单元原文。'}</p>
-          {unit.vocabulary.length > 0 && (
-            <div className="mt-3 text-sm text-slate-700">
-              <p className="font-medium text-slate-900">核心词汇</p>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {unit.vocabulary.slice(0, 4).map((word, wordIdx) => (
-                  <span key={wordIdx} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-700">{word.text}</span>
-                ))}
-              </div>
-            </div>
-          )}
+  {(deepSeekParsePrompt || deepSeekParseResponse) && (
+    <details className="mt-6 rounded-3xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+      <summary className="cursor-pointer text-sm font-medium text-slate-700">调试信息（DeepSeek Prompt / 解析结果）</summary>
+      {deepSeekParsePrompt && (
+        <div className="mt-3">
+          <p className="font-medium text-slate-900">DeepSeek 解析 Prompt</p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{deepSeekParsePrompt}</pre>
         </div>
-      ))}
-    </div>
-  </div>
+      )}
+      {deepSeekParseResponse && (
+        <div className="mt-3">
+          <p className="font-medium text-slate-900">DeepSeek 解析结果（JSON 预览）</p>
+          <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap">{deepSeekParseResponse}</pre>
+        </div>
+      )}
+    </details>
+  )}
 
   <div className="mt-8 rounded-[28px] bg-cream p-6 shadow-sm">
     <h3 className="text-xl font-semibold text-slate-900">选中句子分析</h3>
@@ -507,7 +474,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
       <div className="rounded-3xl bg-white p-4 shadow-sm">
         <p className="text-sm font-medium text-slate-900">当前句子</p>
         <div className="mt-3 min-h-[96px] rounded-3xl border border-slate-200 bg-cream p-4 text-sm leading-7 text-slate-700">
-          {selectedSentence || '请先从上方句子列表中选择一句进行分析。'}
+          {selectedSentence || '从「课程路径」的「句型精析」课时进入时，会自动分析该单元的核心句子。'}
         </div>
         {selectedSentence && (
           <div className="mt-4 rounded-3xl bg-slate-50 p-4 text-sm text-slate-700">

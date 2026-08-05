@@ -6,9 +6,12 @@ import { UnitPracticeCard } from './components/UnitPracticeCard';
 import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitModulePrompt, buildDeepSeekUrl,
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
 import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview } from './lib/storage';
-import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, TabKey, UnitSection, WordCandidate } from './types';
+import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate } from './types';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
+import { AuthModal } from './components/AuthModal';
+import { fetchAllUserData, getCurrentUser, pushUserData, signInWithEmail, signOut, signUpWithEmail, supabaseConfigured, SYNC_KEYS } from './lib/supabase';
+import type { SupabaseUser, SyncKey } from './lib/supabase';
 
 /** 无 DeepSeek Key 时的离线语法练习兜底 */
 const STATIC_GRAMMAR: Record<string, GrammarExercise[]> = {
@@ -100,6 +103,22 @@ function App() {
   const [unitModuleLoading, setUnitModuleLoading] = useState<number | null>(null);
   const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
 
+  /* ---- 云端登录与同步 ---- */
+  const [authUser, setAuthUser] = useState<SupabaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'off' | 'syncing' | 'synced' | 'error'>('off');
+  const [pathProgress, setPathProgress] = useState<PathProgress>(() => {
+    try {
+      return JSON.parse(window.localStorage.getItem('french-path-progress') || '{}') as PathProgress;
+    } catch {
+      return {};
+    }
+  });
+
   useEffect(() => {
     const savedUrl = window.localStorage.getItem('deepseek-api-url');
     const savedParseUrl = window.localStorage.getItem('deepseek-parse-url');
@@ -143,6 +162,155 @@ function App() {
     }
     void restoreSavedMaterial();
   }, []);
+
+  /** 启动时恢复 Supabase 登录态，登录后拉取云端记录到本地 */
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!supabaseConfigured) {
+        setAuthLoading(false);
+        return;
+      }
+      try {
+        const user = await getCurrentUser();
+        if (cancelled) return;
+        setAuthUser(user);
+        if (user) await applyCloudToLocal();
+      } catch (e) {
+        console.warn('恢复登录状态失败：', e);
+      } finally {
+        if (!cancelled) setAuthLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** 云端优先：登录时把云端记录写回本地；本地有而云端没有的则上传 */
+  const applyCloudToLocal = async () => {
+    setSyncStatus('syncing');
+    try {
+      const cloud = await fetchAllUserData();
+      for (const key of SYNC_KEYS) {
+        const value = cloud[key];
+        if (value !== undefined) {
+          window.localStorage.setItem(key, JSON.stringify(value));
+          switch (key) {
+            case 'french-word-book':
+              setWordBook(value as WordCandidate[]);
+              break;
+            case 'french-flashcard-mastery':
+              setFlashcardMastery(value as Record<string, number>);
+              break;
+            case 'french-analysis-history':
+              setAnalysisHistory(value as AnalysisRecord[]);
+              break;
+            case 'french-path-progress':
+              setPathProgress(value as PathProgress);
+              break;
+            case 'french-preview':
+              setMaterialPreview(value as MaterialPreview);
+              break;
+          }
+        } else {
+          const raw = window.localStorage.getItem(key);
+          if (raw) {
+            try {
+              await pushUserData(key, JSON.parse(raw));
+            } catch {
+              // 单条上传失败不阻断整体流程
+            }
+          }
+        }
+      }
+      setSyncStatus('synced');
+    } catch (e) {
+      console.warn('云端数据拉取失败：', e);
+      setSyncStatus('error');
+    }
+  };
+
+  /** 登录 / 注册提交 */
+  const handleAuthSubmit = async (email: string, password: string, mode: 'login' | 'signup') => {
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const user = mode === 'login' ? await signInWithEmail(email, password) : await signUpWithEmail(email, password);
+      setAuthUser(user);
+      setAuthModalOpen(false);
+      await applyCloudToLocal();
+    } catch (e) {
+      setAuthError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAuthSubmitting(false);
+    }
+  };
+
+  /** 登出：清本地会话与状态 */
+  const handleLogout = async () => {
+    await signOut();
+    setAuthUser(null);
+    setSyncStatus('off');
+  };
+
+  /** 路径进度持久化到本地 */
+  useEffect(() => {
+    window.localStorage.setItem('french-path-progress', JSON.stringify(pathProgress));
+  }, [pathProgress]);
+
+  /** 已登录时，学习记录变化后防抖上传云端 */
+  useEffect(() => {
+    if (!authUser) return;
+    setSyncStatus('syncing');
+    const t = setTimeout(() => {
+      void pushUserData('french-word-book', wordBook)
+        .then(() => setSyncStatus('synced'))
+        .catch(() => setSyncStatus('error'));
+    }, 800);
+    return () => clearTimeout(t);
+  }, [wordBook, authUser]);
+  useEffect(() => {
+    if (!authUser) return;
+    setSyncStatus('syncing');
+    const t = setTimeout(() => {
+      void pushUserData('french-flashcard-mastery', flashcardMastery)
+        .then(() => setSyncStatus('synced'))
+        .catch(() => setSyncStatus('error'));
+    }, 800);
+    return () => clearTimeout(t);
+  }, [flashcardMastery, authUser]);
+  useEffect(() => {
+    if (!authUser) return;
+    setSyncStatus('syncing');
+    const t = setTimeout(() => {
+      void pushUserData('french-analysis-history', analysisHistory)
+        .then(() => setSyncStatus('synced'))
+        .catch(() => setSyncStatus('error'));
+    }, 800);
+    return () => clearTimeout(t);
+  }, [analysisHistory, authUser]);
+  useEffect(() => {
+    if (!authUser) return;
+    setSyncStatus('syncing');
+    const t = setTimeout(() => {
+      void pushUserData('french-path-progress', pathProgress)
+        .then(() => setSyncStatus('synced'))
+        .catch(() => setSyncStatus('error'));
+    }, 800);
+    return () => clearTimeout(t);
+  }, [pathProgress, authUser]);
+  useEffect(() => {
+    if (!authUser || !materialPreview) return;
+    setSyncStatus('syncing');
+    const t = setTimeout(() => {
+      void pushUserData('french-preview', materialPreview)
+        .then(() => setSyncStatus('synced'))
+        .catch(() => setSyncStatus('error'));
+    }, 800);
+    return () => clearTimeout(t);
+  }, [materialPreview, authUser]);
 
   useEffect(() => {
     if (materialPreview) savePreview(materialPreview);
@@ -478,18 +646,12 @@ function App() {
   const generateDeepSeekStudyPlan = (units: UnitSection[]) => {
     if (units.length === 0) return [];
 
-    const overview = [
-      `DeepSeek 已解析出 ${units.length} 个单元。建议先按单元顺序逐个学习，先掌握主题词汇，再分析关键句型。`,
-      '每个单元先阅读摘要并提取核心主题词，然后选择 1-2 句进行语法拆解和句型归纳。',
-      '将核心词汇加入生词本，之后用这些词汇造句或写一段简短总结。',
-      '通过生成练习题、口语模拟或写作复述，巩固本单元的语法与表达。',
+    return [
+      `共 ${units.length} 个单元：先在「单元目录」浏览每单元主题、页码与核心词汇，确定学习顺序。`,
+      '每个单元：先读摘要和核心词汇 → 用「教材原页预览」精读课文 → 展开「详细学习卡」复习词汇 / 语法 / 常见错误 / 例句。',
+      '学完一个单元后，到「课程路径」完成对应课时的词汇、句型、语法、练习与闪卡复习。',
+      '把不熟的词加入生词本，之后用「单词闪卡」定期复习巩固。',
     ];
-
-    const unitDetails = units.slice(0, 4).map((unit, index) =>
-      `单元 ${index + 1} (${unit.title})：${unit.summary || '请先阅读本单元主题内容，再从中摘取关键句做分析。'}`
-    );
-
-    return [...overview, ...unitDetails];
   };
 
   const deepSeekStudyPlan = useMemo(
@@ -1208,7 +1370,46 @@ function App() {
               📊 我的进度
             </button>
           </div>
-          <p className="text-sm text-slate-500">Immerse yourself in French with cozy visuals and playful guidance.</p>
+          <div className="flex flex-col items-start gap-3 md:items-end">
+            <div className="flex flex-wrap items-center gap-3">
+              {authLoading ? (
+                <span className="text-xs text-slate-400">正在恢复登录…</span>
+              ) : authUser ? (
+                <>
+                  <span
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium ${
+                      syncStatus === 'synced'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : syncStatus === 'syncing'
+                          ? 'bg-sky-50 text-sky-700'
+                          : syncStatus === 'error'
+                            ? 'bg-rose-50 text-rose-600'
+                            : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {syncStatus === 'synced' ? '☁️ 已同步' : syncStatus === 'syncing' ? '☁️ 同步中…' : syncStatus === 'error' ? '⚠️ 同步失败' : '☁️ 待同步'}
+                  </span>
+                  <span className="max-w-[200px] truncate text-sm text-slate-600">{authUser.email}</span>
+                  <button
+                    type="button"
+                    onClick={() => void handleLogout()}
+                    className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                  >
+                    退出
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAuthModalOpen(true)}
+                  className="rounded-2xl bg-coral px-4 py-2 text-sm font-semibold text-white shadow-sm hover:opacity-90"
+                >
+                  ☁️ 登录 / 注册
+                </button>
+              )}
+            </div>
+            <p className="text-sm text-slate-500">Immerse yourself in French with cozy visuals and playful guidance.</p>
+          </div>
         </nav>
 
         <section className="mt-8 grid gap-6 xl:grid-cols-2">
@@ -1256,6 +1457,16 @@ function App() {
       onGoLearn={() => setActiveTab('learn')}
       onGenerateUnitModule={generateUnitModule}
       unitModuleLoading={unitModuleLoading}
+      progress={pathProgress}
+      onToggleProgress={(unit, lesson) => {
+        setPathProgress(prev => {
+          const next = { ...prev };
+          const key = `${unit}:${lesson}`;
+          if (next[key]) delete next[key];
+          else next[key] = true;
+          return next;
+        });
+      }}
     />
   )}
 
@@ -1359,6 +1570,15 @@ function App() {
   )}
             </div>
           </section>
+          <AuthModal
+            open={authModalOpen}
+            mode={authMode}
+            onModeChange={setAuthMode}
+            onSubmit={handleAuthSubmit}
+            submitting={authSubmitting}
+            error={authError}
+            onClose={() => setAuthModalOpen(false)}
+          />
         </main>
 
       </div>

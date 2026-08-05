@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { MaterialPreview, PathProgress } from '../types';
 import { UnitStudyModule } from '../components/UnitStudyModule';
-
-const STORAGE_KEY = 'french-path-progress';
 
 /** 每个单元固定 8 个课时：精读 / 句型 / 词汇 / 练习 / 跟读 / 语法 / 写作 / 复习 */
 const LESSONS = [
@@ -30,6 +28,8 @@ type PathTabProps = {
   onGoLearn: () => void;
   onGenerateUnitModule: (unitIndex: number) => Promise<void>;
   unitModuleLoading: number | null;
+  progress: PathProgress;
+  onToggleProgress: (unit: number, lesson: number) => void;
 };
 
 /** 从教材文件名推断 CEFR 等级，缺省 B2 */
@@ -55,23 +55,13 @@ export function PathTab({
   onGoLearn,
   onGenerateUnitModule,
   unitModuleLoading,
+  progress,
+  onToggleProgress,
 }: PathTabProps) {
   const [view, setView] = useState<'list' | 'detail'>('list');
   const [dialog, setDialog] = useState<{ unit: number; lesson: number } | null>(null);
   const [expandedModule, setExpandedModule] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [progress, setProgress] = useState<PathProgress>(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem(STORAGE_KEY) || '{}') as PathProgress;
-    } catch {
-      return {};
-    }
-  });
-
-  useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
-  }, [progress]);
-
   const course = useMemo(() => {
     if (!materialPreview || materialPreview.units.length === 0) return null;
     const level = detectLevel(pdfName);
@@ -92,13 +82,7 @@ export function PathTab({
   const lessonDone = Object.values(progress).filter(Boolean).length;
 
   const toggleDone = (unit: number, lesson: number) => {
-    setProgress(prev => {
-      const next = { ...prev };
-      const key = `${unit}:${lesson}`;
-      if (next[key]) delete next[key];
-      else next[key] = true;
-      return next;
-    });
+    onToggleProgress(unit, lesson);
   };
 
   const startLesson = (unit: number, lesson: number) => {
