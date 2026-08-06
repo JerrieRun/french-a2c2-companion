@@ -123,27 +123,44 @@ export function MarkdownReader(props: MarkdownReaderProps) {
 
   const clearSelection = () => setSelection(null);
 
-  const handleMouseUp = () => {
-    requestAnimationFrame(() => {
-      const sel = window.getSelection();
-      if (!sel || sel.isCollapsed) {
-        setSelection(null);
-        return;
-      }
-      const text = sel.toString().replace(/\s+/g, ' ').trim();
-      if (!text || text.length > 500) {
-        setSelection(null);
-        return;
-      }
-      const range = sel.getRangeAt(0);
-      const rect = range.getBoundingClientRect();
-      const container = scrollRef.current?.getBoundingClientRect();
-      setSelection({
-        text,
-        x: rect.left - (container?.left ?? 0),
-        y: rect.top - (container?.top ?? 0) - 48,
-      });
+  /** 选区变化即同步工具条：兼容拖选在容器外松开 / 双击 / 键盘 / 程序化选区 */
+  const syncSelection = () => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const sel = window.getSelection();
+    const text = sel ? sel.toString().replace(/\s+/g, ' ').trim() : '';
+    if (!sel || !sel.rangeCount || sel.isCollapsed || !text) {
+      setSelection(null);
+      return;
+    }
+    // 过长选区（如全选整本）不弹工具条，避免误触超大请求
+    if (text.length > 10000) {
+      setSelection(null);
+      return;
+    }
+    const range = sel.getRangeAt(0);
+    // 只处理阅读器正文内的选区：祖先在容器内，或选区起点/终点至少一端在容器内（拖选越过容器边缘也弹）
+    const inReader =
+      container.contains(range.commonAncestorContainer) ||
+      (container.contains(range.startContainer) && container.contains(range.endContainer));
+    if (!inReader) return;
+    const rect = range.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    setSelection({
+      text,
+      x: Math.min(Math.max(rect.left - containerRect.left, 8), Math.max(containerRect.width - 280, 8)),
+      y: Math.max(rect.top - containerRect.top - 48, 8),
     });
+  };
+
+  // 全局监听选区变化（最稳，覆盖在容器外松开的情况）；容器内松开时再校正一次位置
+  useEffect(() => {
+    document.addEventListener('selectionchange', syncSelection);
+    return () => document.removeEventListener('selectionchange', syncSelection);
+  }, []);
+
+  const handleMouseUp = () => {
+    window.setTimeout(syncSelection, 10);
   };
 
   const runAction = async (action: 'translate' | 'analyze' | 'word' | 'add') => {
