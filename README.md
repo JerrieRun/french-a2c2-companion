@@ -63,3 +63,26 @@
 > ⚠️ 注意：`VITE_DEEPSEEK_API_URL` / “基础后端地址”若包含 `deepseek.com`（如 `api.deepseek.com/anthropic`），会被自动识别为官方域名并按官方 API 处理，不会再拼接 `/parse` 等后缀。
 
 - `自动 DeepSeek` 模式会在 DeepSeek 调用失败时降级到本地解析。
+## Markdown 精读模式
+
+「教材中心 → 教材精读」支持在 **PDF 原页** 与 **Markdown 精读** 两种模式间切换。
+
+Markdown 精读页把教材转为结构化 Markdown（标题 / 段落 / 列表 / 表格），
+排版更清爽，且结构化文本更利于 AI（DeepSeek 等）识别与分析。
+
+- **自动转换（推荐）**：上传/恢复教材后，应用会在本地浏览器自动生成 Markdown（不离开设备，适合大文件），
+  首次生成约需几十秒（按页数），之后自动缓存到 IndexedDB，无需重复生成。
+- **划线精读**：在 Markdown 正文上划选句子/段落/单词，可翻译、句型分析、单词详解、加入生词本（与 PDF 原页一致）。
+- **阅读辅助**：字号调节（A−/A+）、行距、版宽、按单元跳转、页标记（点击跳回 PDF 原页对照）。
+- **喂给 AI**：一键「复制单元（给 AI）」/「复制全文」，把结构化 Markdown 粘贴到任意 AI；「下载 .md」可保存为文件。
+- **导入外部 .md**：可用微软开源工具 **MarkItDown** 在本地转换超大 PDF 后导入：
+
+  ```bash
+  pip install "markitdown[pdf]"
+  python scripts/pdf_to_markdown.py 教材.pdf 教材.md
+  ```
+
+  然后在「Markdown 精读」页点击「📥 导入 .md」加载。
+
+> 说明：MarkItDown（https://github.com/microsoft/markitdown ）是微软开源的 PDF/Word/PPT→Markdown 工具；
+> 应用内置的浏览器端转换器采用相同思路（按坐标/字号重建结构），两者可互补使用。

@@ -85,3 +85,43 @@ export function loadPreview(): MaterialPreview | null {
 export function clearPreview(): void {
   window.localStorage.removeItem(PREVIEW_KEY);
 }
+
+const TEXTBOOK_MD_KEY = 'textbook-md';
+
+/** Markdown 精读文本（可能较大，直接存 IndexedDB，避免 localStorage 5MB 限制） */
+export async function saveTextbookMarkdown(markdown: string): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).put(
+      { id: TEXTBOOK_MD_KEY, savedAt: new Date().toISOString(), data: markdown } as { id: string; savedAt: string; data: string },
+      TEXTBOOK_MD_KEY
+    );
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}
+
+export async function loadTextbookMarkdown(): Promise<string | null> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readonly');
+    const req = tx.objectStore(STORE).get(TEXTBOOK_MD_KEY);
+    req.onsuccess = () => {
+      const rec = req.result as { data?: string } | undefined;
+      db.close();
+      resolve(rec?.data ?? null);
+    };
+    req.onerror = () => { db.close(); reject(req.error); };
+  });
+}
+
+export async function clearTextbookMarkdown(): Promise<void> {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite');
+    tx.objectStore(STORE).delete(TEXTBOOK_MD_KEY);
+    tx.oncomplete = () => { db.close(); resolve(); };
+    tx.onerror = () => { db.close(); reject(tx.error); };
+  });
+}

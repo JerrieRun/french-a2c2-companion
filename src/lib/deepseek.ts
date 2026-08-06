@@ -19,8 +19,11 @@ export const buildParsePrompt = (text: string) => {
 };
 
 /** 生成单个单元的「详细学习卡」：分类词汇 + 语法精华 + 常见错误 + 中法例句 */
-export const buildUnitModulePrompt = (unitTitle: string, summary: string, sentences: string[]) => {
+export const buildUnitModulePrompt = (unitTitle: string, summary: string, sentences: string[], markdownExcerpt?: string) => {
   const excerpt = sentences.slice(0, 6).join('\n');
+  const mdPart = markdownExcerpt
+    ? `\n\n## 单元原文（Markdown 结构，含标题/段落/列表/表格，请优先参考原文结构与用词）\n${markdownExcerpt.slice(0, 6000)}`
+    : '';
   return `System: 你是一位资深法语教师（CEFR A2→C2），请为教材单元生成一份「详细学习卡」，严格输出合法 JSON（不要用 markdown 代码块包裹）。
 
 格式：
@@ -50,6 +53,7 @@ export const buildUnitModulePrompt = (unitTitle: string, summary: string, senten
 
 单元标题：${unitTitle}
 单元摘要：${summary}
+${mdPart}
 单元课文句子（节选）：
 ${excerpt}`;
 };

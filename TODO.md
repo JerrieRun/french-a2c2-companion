@@ -11,6 +11,7 @@
 - [x] 句子语法分析 + 练习生成（JSON 解析容错）
 - [x] 生词本（localStorage 持久化）
 - [x] 进度页：分析历史复盘、清空、导出
+- [x] Markdown 精读模式（2026-08-06）：PDF→Markdown 本地转换器（参考微软 MarkItDown 版式分析，重建标题/段落/列表/表格）+ 精读页（字号/行距/版宽/单元跳转/页对照/复制给 AI/下载 .md）+ 导入外部 .md + 微软 MarkItDown 本地脚本 scripts/pdf_to_markdown.py；单元学习卡生成改用单元 Markdown 原文喂给 DeepSeek
 
 ## 🔄 进行中 / 下一步候选（按优先级排序，由用户挑选）
 - [x] **1. App.tsx 拆分重构**（2026-08-02 完成，1564 → 862 行，构建验证通过）
@@ -32,6 +33,8 @@
 - [ ] 深色模式切换
 - [ ] PWA / 离线可用
 - [ ] 移除未使用的 react-router-dom 依赖（或真正引入路由）
+- [ ] Markdown 精读：双语对照 / 生词高亮 / 句子级点击分析
+- [ ] 教材 PDF 上传 Supabase Storage，实现「换设备自动恢复教材 + Markdown」
 
 ## 🔧 已知技术债
 - App.tsx 仍集中了全部状态与业务逻辑（~860 行），可继续抽 hooks（如 useDeepSeek、useLocalStorage）

@@ -1,6 +1,8 @@
+import { useRef } from 'react';
 import type { ChangeEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { PdfViewer } from '../components/PdfViewer';
+import { MarkdownReader } from '../components/MarkdownReader';
 import { UnitSummaryCard } from '../components/UnitSummaryCard';
 import { UnitStudyModule } from '../components/UnitStudyModule';
 import type { AnalysisResult, MaterialPreview, UnitSection, WordCandidate } from '../types';
@@ -80,6 +82,17 @@ type MaterialsTabProps = {
   restoreNotice: string | null;
   onDismissRestoreNotice: () => void;
   onClearSavedMaterial: () => Promise<void>;
+  // Markdown 精读
+  readerMode: 'pdf' | 'md';
+  setReaderMode: (mode: 'pdf' | 'md') => void;
+  textbookMarkdown: string | null;
+  mdStatus: 'idle' | 'generating' | 'ready' | 'error';
+  mdProgress: { done: number; total: number } | null;
+  mdError: string | null;
+  mdSource: 'auto' | 'imported' | null;
+  onGenerateMarkdown: () => void;
+  onImportMarkdown: (text: string, name?: string) => Promise<void>;
+  onJumpToPdfPage: (page: number) => void;
 };
 
 export function MaterialsTab(props: MaterialsTabProps) {
@@ -101,7 +114,24 @@ export function MaterialsTab(props: MaterialsTabProps) {
     onTranslateText, onAnalyzeText, onWordDetail, onAddWord,
     translationResult, translationLoading, wordDetailResult, wordDetailLoading,
     onGenerateUnitModule, unitModuleLoading, restoreNotice, onDismissRestoreNotice, onClearSavedMaterial,
+    readerMode, setReaderMode, textbookMarkdown, mdStatus, mdProgress, mdError, mdSource,
+    onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
   } = props;
+  const importMdRef = useRef<HTMLInputElement>(null);
+
+  const handleImportMdFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      await onImportMarkdown(text, file.name);
+      setReaderMode('md');
+    } catch (e) {
+      console.warn('导入 Markdown 失败：', e);
+    } finally {
+      event.target.value = '';
+    }
+  };
   return (
     <>
 <div className="space-y-6">
@@ -124,19 +154,111 @@ export function MaterialsTab(props: MaterialsTabProps) {
   </div>
 
   {pdfDoc && (
-    <PdfViewer
-      pdfDoc={pdfDoc}
-      targetPage={pdfTargetPage}
-      jumpSignal={pdfJumpSignal}
-      onTranslateText={onTranslateText}
-      onAnalyzeText={onAnalyzeText}
-      onWordDetail={onWordDetail}
-      onAddWord={onAddWord}
-      translationResult={translationResult}
-      translationLoading={translationLoading}
-      wordDetailResult={wordDetailResult}
-      wordDetailLoading={wordDetailLoading}
-    />
+    <div className="space-y-4">
+      <div className="rounded-[28px] border border-slate-200 bg-white/90 p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h3 className="text-lg font-semibold text-slate-900">📖 教材精读</h3>
+            <p className="mt-1 text-xs text-slate-500">在原文上划线选中句子 / 段落 / 单词，即可翻译、解析句型、单词详解或加入生词本。</p>
+          </div>
+          <div className="flex items-center gap-1.5 rounded-2xl bg-slate-100 p-1">
+            <button
+              type="button"
+              onClick={() => setReaderMode('pdf')}
+              className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${readerMode === 'pdf' ? 'bg-coral text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+            >
+              📄 PDF 原页
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                if (readerMode !== 'md' && textbookMarkdown == null) onGenerateMarkdown();
+                setReaderMode('md');
+              }}
+              className={`rounded-xl px-4 py-2 text-xs font-semibold transition ${readerMode === 'md' ? 'bg-coral text-white shadow-sm' : 'text-slate-600 hover:bg-white'}`}
+            >
+              📝 Markdown 精读
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {readerMode === 'pdf' ? (
+        <PdfViewer
+          pdfDoc={pdfDoc}
+          targetPage={pdfTargetPage}
+          jumpSignal={pdfJumpSignal}
+          onTranslateText={onTranslateText}
+          onAnalyzeText={onAnalyzeText}
+          onWordDetail={onWordDetail}
+          onAddWord={onAddWord}
+          translationResult={translationResult}
+          translationLoading={translationLoading}
+          wordDetailResult={wordDetailResult}
+          wordDetailLoading={wordDetailLoading}
+        />
+      ) : textbookMarkdown ? (
+        <MarkdownReader
+          markdown={textbookMarkdown}
+          fileName={pdfName ?? '教材'}
+          sourceLabel={mdSource === 'imported' ? '已导入文件' : '内置 PDF→Markdown 转换'}
+          units={materialPreview?.units ?? []}
+          onJumpToPdfPage={onJumpToPdfPage}
+          onTranslateText={onTranslateText}
+          onAnalyzeText={onAnalyzeText}
+          onWordDetail={onWordDetail}
+          onAddWord={onAddWord}
+          onImportMarkdown={onImportMarkdown}
+        />
+      ) : mdStatus === 'generating' ? (
+        <div className="rounded-[28px] border border-slate-200 bg-white/90 p-8 shadow-sm">
+          <p className="text-sm font-semibold text-slate-700">正在把教材转换为 Markdown 精读文本…</p>
+          <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-coral transition-all duration-300"
+              style={{ width: mdProgress ? `${Math.max(4, Math.round((mdProgress.done / mdProgress.total) * 100))}%` : '8%' }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            {mdProgress ? `已处理 ${mdProgress.done} / ${mdProgress.total} 页` : '准备中…'}
+          </p>
+          <p className="mt-4 text-xs text-slate-500">
+            转换在本地浏览器完成，教材不会上传。页数较多时首次生成约需几十秒，之后会自动缓存。
+          </p>
+        </div>
+      ) : (
+        <div className="rounded-[28px] border border-slate-200 bg-white/90 p-8 shadow-sm">
+          <p className="text-sm font-semibold text-slate-700">📝 Markdown 精读模式</p>
+          <p className="mt-2 text-sm text-slate-600">
+            把教材转成结构化 Markdown（标题 / 段落 / 列表 / 表格），排版更清爽，也更适合 AI 识别与深入分析。
+          </p>
+          {mdError && <p className="mt-3 rounded-2xl bg-rose-50 p-3 text-xs text-rose-700">生成失败：{mdError}</p>}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onGenerateMarkdown}
+              className="rounded-2xl bg-coral px-4 py-2 text-sm font-semibold text-white hover:opacity-90"
+            >
+              ⚡ 生成 Markdown（本地转换）
+            </button>
+            <button
+              type="button"
+              onClick={() => importMdRef.current?.click()}
+              className="rounded-2xl bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+            >
+              📥 导入已有的 .md
+            </button>
+            <input ref={importMdRef} type="file" accept=".md,.markdown,.txt,text/markdown" className="hidden" onChange={handleImportMdFile} />
+          </div>
+          <p className="mt-4 text-xs text-slate-500">
+            提示：也可用微软开源工具 MarkItDown 在本地把整本 PDF 转成 .md 后，直接在上方「导入已有的 .md」加载：
+          </p>
+          <pre className="mt-2 overflow-x-auto rounded-2xl bg-slate-900 p-3 text-xs leading-6 text-slate-100">
+            {'pip install "markitdown[pdf]"\npython scripts/pdf_to_markdown.py 教材.pdf 教材.md'}
+          </pre>
+        </div>
+      )}
+    </div>
   )}
 
   <div className="grid gap-6 lg:grid-cols-2">

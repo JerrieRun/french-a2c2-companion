@@ -5,7 +5,8 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { UnitPracticeCard } from './components/UnitPracticeCard';
 import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitModulePrompt, buildDeepSeekUrl,
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
-import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview } from './lib/storage';
+import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview, saveTextbookMarkdown, loadTextbookMarkdown, clearTextbookMarkdown } from './lib/storage';
+import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate } from './types';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
@@ -55,6 +56,13 @@ function App() {
   const [pdfPages, setPdfPages] = useState<string[]>([]);
   const [pdfTargetPage, setPdfTargetPage] = useState<number | null>(null);
   const [pdfJumpSignal, setPdfJumpSignal] = useState(0);
+  // Markdown 精读
+  const [readerMode, setReaderMode] = useState<'pdf' | 'md'>('pdf');
+  const [textbookMarkdown, setTextbookMarkdown] = useState<string | null>(null);
+  const [mdStatus, setMdStatus] = useState<'idle' | 'generating' | 'ready' | 'error'>('idle');
+  const [mdProgress, setMdProgress] = useState<{ done: number; total: number } | null>(null);
+  const [mdError, setMdError] = useState<string | null>(null);
+  const [mdSource, setMdSource] = useState<'auto' | 'imported' | null>(null);
   const [translationResult, setTranslationResult] = useState<string | null>(null);
   const [translationLoading, setTranslationLoading] = useState(false);
   const [wordDetailResult, setWordDetailResult] = useState<string | null>(null);
@@ -349,12 +357,73 @@ function App() {
       setPdfName(saved.name);
       setPdfDoc(pdf);
       setMaterialPreview(preview);
+      // 后台预生成 Markdown 精读文本（有缓存则直接读取）
+      void generateTextbookMarkdown(pdf);
       setSelectedUnitIndex(0);
       setCandidateWords(extractWordCandidates(preview.units.map(u => u.sentences.join(' ')).join(' ')));
       setRestoreNotice(`✅ 已自动恢复上次上传的教材《${saved.name}》，无需重新上传。`);
     } catch (e) {
       console.warn('恢复已保存教材失败：', e);
     }
+  };
+
+  /** 把教材转成 Markdown 精读文本：优先读缓存，否则逐页本地转换 */
+  const generateTextbookMarkdown = async (pdf: PDFDocumentProxy | null = pdfDoc) => {
+    if (!pdf) return;
+    if (mdStatus === 'generating') return;
+    try {
+      const cached = await loadTextbookMarkdown();
+      if (cached) {
+        setTextbookMarkdown(cached);
+        setMdStatus('ready');
+        setMdSource(prev => prev ?? 'auto');
+        return;
+      }
+    } catch (e) {
+      console.warn('读取 Markdown 缓存失败：', e);
+    }
+    setMdStatus('generating');
+    setMdProgress(null);
+    setMdError(null);
+    try {
+      const md = await pdfToMarkdown(pdf, (done, total) => setMdProgress({ done, total }));
+      setTextbookMarkdown(md);
+      setMdStatus('ready');
+      setMdSource('auto');
+      try {
+        await saveTextbookMarkdown(md);
+      } catch (e) {
+        console.warn('缓存 Markdown 失败：', e);
+      }
+    } catch (e) {
+      console.error('Markdown 生成失败：', e);
+      setMdStatus('error');
+      setMdError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setMdProgress(null);
+    }
+  };
+
+  /** 导入外部 .md（如微软 MarkItDown 本地转换结果） */
+  const handleImportMarkdown = async (text: string, _name?: string) => {
+    const trimmed = (text || '').trim();
+    if (!trimmed) return;
+    setTextbookMarkdown(trimmed);
+    setMdStatus('ready');
+    setMdSource('imported');
+    setMdError(null);
+    try {
+      await saveTextbookMarkdown(trimmed);
+    } catch (e) {
+      console.warn('缓存导入的 Markdown 失败：', e);
+    }
+  };
+
+  /** 从 Markdown 精读跳回 PDF 原页对应页 */
+  const handleJumpToPdfPage = (page: number) => {
+    setReaderMode('pdf');
+    setPdfTargetPage(page);
+    setPdfJumpSignal(signal => signal + 1);
   };
 
   const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -384,6 +453,19 @@ function App() {
       const candidates = extractWordCandidates(fullText);
       setPdfDoc(pdfDoc);
       setPdfPages(pages);
+      // 重置 Markdown 精读（换新教材后旧缓存/旧内容一律作废），并后台重新生成
+      setTextbookMarkdown(null);
+      setMdStatus('idle');
+      setMdProgress(null);
+      setMdError(null);
+      setMdSource(null);
+      setReaderMode('pdf');
+      try {
+        await clearTextbookMarkdown();
+      } catch (e) {
+        console.warn('清除旧 Markdown 缓存失败：', e);
+      }
+      void generateTextbookMarkdown(pdfDoc);
       const fullPreview = { ...preview, units: unitsWithPages };
       setMaterialPreview(fullPreview);
       setSelectedUnitIndex(0);
@@ -989,10 +1071,13 @@ function App() {
         } : prev);
         return;
       }
+      const mdExcerpt = textbookMarkdown && unit.startPage
+        ? extractMarkdownRange(textbookMarkdown, unit.startPage, unit.endPage)
+        : '';
       const content = await callDeepSeekChat(
         { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
         '你是一位资深法语教师（CEFR A2→C2），负责为教材单元生成详细学习卡，讲解用中文。',
-        buildUnitModulePrompt(unit.title, unit.summary, unit.sentences),
+        buildUnitModulePrompt(unit.title, unit.summary, unit.sentences, mdExcerpt || undefined),
         8192
       );
       const data = extractJson(content);
@@ -1044,6 +1129,7 @@ function App() {
     try {
       await clearPdfFile();
       clearPreview();
+      await clearTextbookMarkdown();
     } catch (e) {
       console.warn('清除本地教材失败：', e);
     }
@@ -1052,6 +1138,12 @@ function App() {
     setMaterialPreview(null);
     setCandidateWords([]);
     setRestoreNotice(null);
+    setTextbookMarkdown(null);
+    setMdStatus('idle');
+    setMdProgress(null);
+    setMdError(null);
+    setMdSource(null);
+    setReaderMode('pdf');
   };
 
   const deepSeekModeLabel = useMemo(() => {
@@ -1551,6 +1643,16 @@ function App() {
       restoreNotice={ restoreNotice }
       onDismissRestoreNotice={ () => setRestoreNotice(null) }
       onClearSavedMaterial={ handleClearSavedMaterial }
+      readerMode={ readerMode }
+      setReaderMode={ setReaderMode }
+      textbookMarkdown={ textbookMarkdown }
+      mdStatus={ mdStatus }
+      mdProgress={ mdProgress }
+      mdError={ mdError }
+      mdSource={ mdSource }
+      onGenerateMarkdown={ () => void generateTextbookMarkdown() }
+      onImportMarkdown={ handleImportMarkdown }
+      onJumpToPdfPage={ handleJumpToPdfPage }
       handleGeneratePractice={ handleGeneratePractice }
       testDeepSeekConnection={ testDeepSeekConnection }
       translateSentence={ translateSentence }
