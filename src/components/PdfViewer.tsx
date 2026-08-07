@@ -9,10 +9,6 @@ type PdfViewerProps = {
   onAnalyzeText: (text: string) => Promise<void> | void;
   onWordDetail: (text: string) => Promise<void> | void;
   onAddWord: (text: string) => void;
-  translationResult: string | null;
-  translationLoading: boolean;
-  wordDetailResult: string | null;
-  wordDetailLoading: boolean;
 };
 
 /** 合并 pdf.js 视口变换与文本项变换（等价 Util.transform） */
@@ -116,10 +112,6 @@ export function PdfViewer(props: PdfViewerProps) {
     onAnalyzeText,
     onWordDetail,
     onAddWord,
-    translationResult,
-    translationLoading,
-    wordDetailResult,
-    wordDetailLoading,
   } = props;
   const [scale, setScale] = useState(1.15);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -302,22 +294,6 @@ export function PdfViewer(props: PdfViewerProps) {
         )}
       </div>
 
-      {(translationResult || translationLoading) && (
-        <div className="mt-4 rounded-2xl border border-sky/40 bg-sky/10 p-4">
-          <p className="text-xs font-semibold text-slate-500">🌐 翻译结果</p>
-          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">
-            {translationLoading ? '翻译中…' : translationResult}
-          </p>
-        </div>
-      )}
-      {(wordDetailResult || wordDetailLoading) && (
-        <div className="mt-4 rounded-2xl border border-lavender/50 bg-lavender/10 p-4">
-          <p className="text-xs font-semibold text-slate-500">📖 单词 / 短语详解</p>
-          <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-slate-800">
-            {wordDetailLoading ? '详解生成中…' : wordDetailResult}
-          </p>
-        </div>
-      )}
     </div>
   );
 }

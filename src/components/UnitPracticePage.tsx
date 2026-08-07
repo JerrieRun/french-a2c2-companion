@@ -23,10 +23,23 @@ const SECTION_META: { key: string; icon: string; title: string; exam: string }[]
 ];
 
 function AnswerRow({ item, id }: { item: PracticeItem; id: string }) {
+  const [showZh, setShowZh] = useState(false);
   const [open, setOpen] = useState(false);
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-3.5">
       <p className="text-sm leading-6 text-slate-800">{item.question}</p>
+      {item.questionZh && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowZh(z => !z)}
+            className={`mt-1.5 rounded-xl px-2.5 py-1 text-[11px] font-semibold transition ${showZh ? 'bg-sky/30 text-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+          >
+            {showZh ? '🙈 收起中文' : '🇨🇳 中文翻译'}
+          </button>
+          {showZh && <p className="mt-1.5 text-sm leading-6 text-slate-500">📖 {item.questionZh}</p>}
+        </div>
+      )}
       {!!item.options?.length && (
         <ul className="mt-2 space-y-1">
           {item.options.map((opt, i) => (
@@ -45,6 +58,27 @@ function AnswerRow({ item, id }: { item: PracticeItem; id: string }) {
         <div className="mt-2 rounded-xl bg-emerald-50 p-2.5 text-sm">
           <p className="font-semibold text-emerald-700">✅ {item.answer}</p>
           {item.explain && <p className="mt-1 text-xs leading-5 text-slate-600">{item.explain}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListeningInstructions({ fr, zh }: { fr: string; zh?: string }) {
+  const [showZh, setShowZh] = useState(false);
+  return (
+    <div>
+      <p className="text-sm text-slate-600">📌 {fr}</p>
+      {zh && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowZh(z => !z)}
+            className={`mt-1.5 rounded-xl px-2.5 py-1 text-[11px] font-semibold transition ${showZh ? 'bg-sky/30 text-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+          >
+            {showZh ? '🙈 收起中文' : '🇨🇳 中文翻译'}
+          </button>
+          {showZh && <p className="mt-1.5 text-sm leading-6 text-slate-500">📖 {zh}</p>}
         </div>
       )}
     </div>
@@ -139,7 +173,7 @@ export function UnitPracticePage({ unit, level, loading, onGenerate }: UnitPract
 
       {p.listening && (
         <SectionShell icon="🎧" title="听力理解" exam="Compréhension orale">
-          {p.listening.instructions && <p className="text-sm text-slate-600">📌 {p.listening.instructions}</p>}
+          {p.listening.instructions && <ListeningInstructions fr={p.listening.instructions} zh={p.listening.instructionsZh} />}
           {p.listening.transcript && (
             <div>
               <div className="flex gap-2">
@@ -220,6 +254,18 @@ export function UnitPracticePage({ unit, level, loading, onGenerate }: UnitPract
       {p.writing && (
         <SectionShell icon="✍️" title="书面表达 · 写作复述" exam="Production écrite">
           <p className="whitespace-pre-wrap rounded-2xl bg-white p-3.5 text-sm leading-6 text-slate-800">{p.writing.prompt}</p>
+          {p.writing.promptZh && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowModel(s => ({ ...s, writingZh: !s.writingZh }))}
+                className={`mt-1.5 rounded-xl px-2.5 py-1 text-[11px] font-semibold transition ${showModel.writingZh ? 'bg-sky/30 text-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              >
+                {showModel.writingZh ? '🙈 收起中文' : '🇨🇳 中文翻译'}
+              </button>
+              {showModel.writingZh && <p className="mt-1.5 text-sm leading-6 text-slate-500">📖 {p.writing.promptZh}</p>}
+            </div>
+          )}
           {!!p.writing.tips?.length && (
             <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
               {p.writing.tips.map((t, i) => <li key={i}>{t}</li>)}
@@ -245,6 +291,18 @@ export function UnitPracticePage({ unit, level, loading, onGenerate }: UnitPract
       {p.oral && (
         <SectionShell icon="🗣️" title="口语表达 · 复述" exam="Production orale">
           <p className="whitespace-pre-wrap rounded-2xl bg-white p-3.5 text-sm leading-6 text-slate-800">{p.oral.prompt}</p>
+          {p.oral.promptZh && (
+            <div>
+              <button
+                type="button"
+                onClick={() => setShowModel(s => ({ ...s, oralZh: !s.oralZh }))}
+                className={`mt-1.5 rounded-xl px-2.5 py-1 text-[11px] font-semibold transition ${showModel.oralZh ? 'bg-sky/30 text-slate-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+              >
+                {showModel.oralZh ? '🙈 收起中文' : '🇨🇳 中文翻译'}
+              </button>
+              {showModel.oralZh && <p className="mt-1.5 text-sm leading-6 text-slate-500">📖 {p.oral.promptZh}</p>}
+            </div>
+          )}
           {!!p.oral.points?.length && (
             <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
               {p.oral.points.map((t, i) => <li key={i}>{t}</li>)}

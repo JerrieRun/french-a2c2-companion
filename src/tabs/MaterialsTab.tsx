@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { PdfViewer } from '../components/PdfViewer';
 import { MarkdownReader } from '../components/MarkdownReader';
+import { ResultFloatingPanel } from '../components/ResultFloatingPanel';
 import { UnitSummaryCard } from '../components/UnitSummaryCard';
 import { UnitStudyModule } from '../components/UnitStudyModule';
 import type { AnalysisResult, MaterialPreview, UnitSection, WordCandidate } from '../types';
@@ -93,6 +94,10 @@ type MaterialsTabProps = {
   onGenerateMarkdown: () => void;
   onImportMarkdown: (text: string, name?: string) => Promise<void>;
   onJumpToPdfPage: (page: number) => void;
+  // 结果悬浮面板关闭
+  onCloseTranslation: () => void;
+  onCloseWordDetail: () => void;
+  onCloseAnalysis: () => void;
 };
 
 export function MaterialsTab(props: MaterialsTabProps) {
@@ -116,6 +121,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     onGenerateUnitModule, unitModuleLoading, restoreNotice, onDismissRestoreNotice, onClearSavedMaterial,
     readerMode, setReaderMode, textbookMarkdown, mdStatus, mdProgress, mdError, mdSource,
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
+    onCloseTranslation, onCloseWordDetail, onCloseAnalysis,
   } = props;
   const importMdRef = useRef<HTMLInputElement>(null);
 
@@ -192,10 +198,6 @@ export function MaterialsTab(props: MaterialsTabProps) {
           onAnalyzeText={onAnalyzeText}
           onWordDetail={onWordDetail}
           onAddWord={onAddWord}
-          translationResult={translationResult}
-          translationLoading={translationLoading}
-          wordDetailResult={wordDetailResult}
-          wordDetailLoading={wordDetailLoading}
         />
       ) : textbookMarkdown ? (
         <MarkdownReader
@@ -713,6 +715,18 @@ export function MaterialsTab(props: MaterialsTabProps) {
   </div>
 </section>
       )}
+      {/* 精读结果悬浮面板：翻译 / 详解 / 句型分析 */}
+      <ResultFloatingPanel
+        translation={translationResult}
+        translationLoading={translationLoading}
+        wordDetail={wordDetailResult}
+        wordDetailLoading={wordDetailLoading}
+        analysis={analysisResult}
+        analysisLoading={loading}
+        onCloseTranslation={onCloseTranslation}
+        onCloseWordDetail={onCloseWordDetail}
+        onCloseAnalysis={onCloseAnalysis}
+      />
     </>
   );
 }

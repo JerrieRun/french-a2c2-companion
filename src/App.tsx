@@ -1703,6 +1703,9 @@ function App() {
       onGenerateMarkdown={ () => void generateTextbookMarkdown() }
       onImportMarkdown={ handleImportMarkdown }
       onJumpToPdfPage={ handleJumpToPdfPage }
+      onCloseTranslation={ () => setTranslationResult(null) }
+      onCloseWordDetail={ () => setWordDetailResult(null) }
+      onCloseAnalysis={ () => setAnalysisResult(null) }
       handleGeneratePractice={ handleGeneratePractice }
       testDeepSeekConnection={ testDeepSeekConnection }
       translateSentence={ translateSentence }

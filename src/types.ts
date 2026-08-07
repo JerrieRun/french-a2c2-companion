@@ -100,9 +100,12 @@ export type AnalysisRecord = {
   practiceExercises?: string[];
 };
 
-/** 练习条目：题干 + 选项 + 答案 + 解析 */
+/** 练习条目：法语题干 + 隐藏中文翻译 + 选项 + 答案 + 解析 */
 export type PracticeItem = {
+  /** 法语题干 */
   question: string;
+  /** 中文翻译（默认隐藏，可点击显示） */
+  questionZh?: string;
   options?: string[];
   answer: string;
   explain?: string;
@@ -125,7 +128,7 @@ export type CorrectionItem = {
 /** 单元练习：覆盖法语考级（DELF B2 / DALF C1 / TCF）主要题型 */
 export type UnitPractice = {
   /** 听力理解 */
-  listening?: { instructions: string; transcript?: string; items: PracticeItem[] };
+  listening?: { instructions: string; instructionsZh?: string; transcript?: string; items: PracticeItem[] };
   /** 阅读理解 */
   reading?: { passage: string; items: PracticeItem[] };
   /** 语法与结构 */
@@ -139,7 +142,7 @@ export type UnitPractice = {
   /** 改错 */
   correction?: { items: CorrectionItem[] };
   /** 书面表达（含写作复述） */
-  writing?: { prompt: string; tips: string[]; modelAnswer: string };
+  writing?: { prompt: string; promptZh?: string; tips: string[]; modelAnswer: string };
   /** 口语表达（含复述/独白） */
-  oral?: { prompt: string; points: string[]; modelAnswer: string };
+  oral?: { prompt: string; promptZh?: string; points: string[]; modelAnswer: string };
 };
