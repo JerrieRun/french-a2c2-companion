@@ -8,7 +8,7 @@ import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitMo
 import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview, saveTextbookMarkdown, loadTextbookMarkdown, clearTextbookMarkdown } from './lib/storage';
 import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
-import type { AnalysisRecord, AnalysisResult, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate } from './types';
+import type { AnalysisRecord, AnalysisResult, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate, WordLookupResult } from './types';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
 import { AuthModal } from './components/AuthModal';
@@ -68,6 +68,9 @@ function App() {
   // 精析（翻译 + 句型精析合并）
   const [intensiveResult, setIntensiveResult] = useState<IntensiveAnalysis | null>(null);
   const [intensiveLoading, setIntensiveLoading] = useState(false);
+  // 点击查词
+  const [wordLookup, setWordLookup] = useState<WordLookupResult | null>(null);
+  const [wordLookupLoading, setWordLookupLoading] = useState(false);
   const [translationLoading, setTranslationLoading] = useState(false);
   const [wordDetailResult, setWordDetailResult] = useState<string | null>(null);
   const [wordDetailLoading, setWordDetailLoading] = useState(false);
@@ -1366,6 +1369,62 @@ function App() {
 
   const handleCloseIntensive = () => setIntensiveResult(null);
 
+  /** 点击查词：简洁释义（贴合文义置顶）+ 常用搭配 + 动词变位 */
+  const lookupWord = async (word: string, context?: string) => {
+    const trimmed = word.trim().replace(/[.,;:!?«»""'']+$/g, '');
+    if (!trimmed) return;
+    setWordLookupLoading(true);
+    setWordLookup(null);
+    try {
+      if (deepSeekApiKey) {
+        const content = await callDeepSeekChat(
+          { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+          '你是一位法语词汇专家。请用中文给出单词的简洁易懂释义（一句话一条，最多 3 条），并把「最贴合给定上下文」的释义放在最前面；同时列出常用搭配 2-5 个；如果该词是动词，请给出常见时态变位（présent / passé composé / imparfait / futur simple 至少四个时态，每个时态列出 je/tu/il-elle/nous/vous/ils-elles 六个人称）。严格输出合法 JSON（不要用 markdown 代码块包裹）：{"defs":["释义1（最贴近上下文）","释义2"],"collocations":["搭配1","搭配2"],"isVerb":true/false,"conjugation":[{"tense":"présent","forms":["je ...","tu ...",...]},...]}。非动词时 conjugation 为空数组。',
+          `单词：${trimmed}\n上下文：${context || '（无上下文）'}`,
+          2048
+        );
+        const data = extractJson(content);
+        const defs = Array.isArray(data?.defs) ? data.defs.map((d: unknown) => String(d)).filter(Boolean) : [];
+        const collocations = Array.isArray(data?.collocations) ? data.collocations.map((c: unknown) => String(c)).filter(Boolean) : [];
+        const conjugation = Array.isArray(data?.conjugation)
+          ? data.conjugation
+              .map((t: any) => ({ tense: String(t?.tense ?? ''), forms: Array.isArray(t?.forms) ? t.forms.map((f: unknown) => String(f)).filter(Boolean) : [] }))
+              .filter((t: { tense: string; forms: unknown[] }) => t.tense && t.forms.length)
+          : [];
+        setWordLookup({
+          word: trimmed,
+          defs: defs.length ? defs : ['（未能生成释义）'],
+          collocations,
+          isVerb: !!data?.isVerb,
+          conjugation,
+        });
+      } else {
+        const local = translateWord(trimmed.toLowerCase());
+        setWordLookup({
+          word: trimmed,
+          defs: local === '待补充' ? [`「${trimmed}」本地词典暂无释义，配置 DeepSeek API Key 后可获取完整释义。`] : [local],
+          collocations: [],
+          isVerb: false,
+          conjugation: [],
+        });
+      }
+    } catch (e) {
+      console.error('查词失败：', e);
+      const local = translateWord(trimmed.toLowerCase());
+      setWordLookup({
+        word: trimmed,
+        defs: [local === '待补充' ? '（查词失败，请检查网络或后端配置）' : local],
+        collocations: [],
+        isVerb: false,
+        conjugation: [],
+      });
+    } finally {
+      setWordLookupLoading(false);
+    }
+  };
+
+  const handleCloseWordLookup = () => setWordLookup(null);
+
   const runSelectedTextTranslation = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -1757,6 +1816,10 @@ function App() {
       intensiveResult={ intensiveResult }
       intensiveLoading={ intensiveLoading }
       onCloseIntensive={ handleCloseIntensive }
+      wordLookup={ wordLookup }
+      wordLookupLoading={ wordLookupLoading }
+      onLookupWord={ lookupWord }
+      onCloseWordLookup={ handleCloseWordLookup }
       handleGeneratePractice={ handleGeneratePractice }
       testDeepSeekConnection={ testDeepSeekConnection }
       translateSentence={ translateSentence }

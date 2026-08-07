@@ -6,7 +6,7 @@ import { MarkdownReader } from '../components/MarkdownReader';
 import { ResultFloatingPanel } from '../components/ResultFloatingPanel';
 import { UnitSummaryCard } from '../components/UnitSummaryCard';
 import { UnitStudyModule } from '../components/UnitStudyModule';
-import type { AnalysisResult, IntensiveAnalysis, MaterialPreview, UnitSection, WordCandidate } from '../types';
+import type { AnalysisResult, IntensiveAnalysis, MaterialPreview, UnitSection, WordCandidate, WordLookupResult } from '../types';
 
 type ParseMode = 'auto' | 'deepseek' | 'local';
 
@@ -91,6 +91,11 @@ type MaterialsTabProps = {
   intensiveResult: IntensiveAnalysis | null;
   intensiveLoading: boolean;
   onCloseIntensive: () => void;
+  // 点击查词
+  wordLookup: WordLookupResult | null;
+  wordLookupLoading: boolean;
+  onLookupWord: (word: string, context?: string) => Promise<void> | void;
+  onCloseWordLookup: () => void;
 };
 
 export function MaterialsTab(props: MaterialsTabProps) {
@@ -114,6 +119,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     readerMode, setReaderMode, textbookMarkdown, mdStatus, mdProgress, mdError, mdSource,
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
     intensiveResult, intensiveLoading, onCloseIntensive,
+    wordLookup, wordLookupLoading, onLookupWord, onCloseWordLookup,
   } = props;
   const importMdRef = useRef<HTMLInputElement>(null);
 
@@ -187,6 +193,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
           targetPage={pdfTargetPage}
           jumpSignal={pdfJumpSignal}
           onIntensiveAnalyze={onIntensiveAnalyze}
+          onLookupWord={onLookupWord}
           onAddWord={onAddWord}
         />
       ) : textbookMarkdown ? (
@@ -197,6 +204,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
           units={materialPreview?.units ?? []}
           onJumpToPdfPage={onJumpToPdfPage}
           onIntensiveAnalyze={onIntensiveAnalyze}
+          onLookupWord={onLookupWord}
           onAddWord={onAddWord}
           onImportMarkdown={onImportMarkdown}
         />
@@ -586,6 +594,10 @@ export function MaterialsTab(props: MaterialsTabProps) {
         intensive={intensiveResult}
         loading={intensiveLoading}
         onClose={onCloseIntensive}
+        word={wordLookup}
+        wordLoading={wordLookupLoading}
+        onAddWord={onAddWord}
+        onCloseWord={onCloseWordLookup}
       />
     </>
   );

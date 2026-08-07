@@ -12,6 +12,7 @@ type MarkdownReaderProps = {
   units: { title: string; startPage?: number; endPage?: number }[];
   onJumpToPdfPage: (page: number) => void;
   onIntensiveAnalyze: (text: string) => Promise<void>;
+  onLookupWord: (word: string, context?: string) => Promise<void> | void;
   onAddWord: (text: string) => void;
   onImportMarkdown: (text: string, name?: string) => Promise<void>;
 };
@@ -72,6 +73,7 @@ export function MarkdownReader(props: MarkdownReaderProps) {
     units,
     onJumpToPdfPage,
     onIntensiveAnalyze,
+    onLookupWord,
     onAddWord,
     onImportMarkdown,
   } = props;
@@ -118,6 +120,32 @@ export function MarkdownReader(props: MarkdownReaderProps) {
   };
 
   const clearSelection = () => setSelection(null);
+
+  // 点击单词 → 查词（无拖选选区时触发），取点击处所在词并带上段落上下文
+  const handleClick = (e: React.MouseEvent) => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button, a, input, select, label')) return;
+    if (typeof document.caretRangeFromPoint !== 'function') return;
+    const range = document.caretRangeFromPoint(e.clientX, e.clientY);
+    if (!range || !range.startContainer || range.startContainer.nodeType !== Node.TEXT_NODE) return;
+    const node = range.startContainer as Text;
+    const text = node.textContent || '';
+    const offset = range.startOffset;
+    const re = /[a-zA-Zàâäéèêëîïôöùûüçœæ'’\-]+/g;
+    let m: RegExpExecArray | null;
+    let hit = '';
+    while ((m = re.exec(text))) {
+      if (offset >= m.index && offset <= m.index + m[0].length) {
+        hit = m[0];
+        break;
+      }
+    }
+    if (!hit) return;
+    const block = node.parentElement?.closest('p, li, h1, h2, h3, h4, h5, h6, td, th') as HTMLElement | null;
+    void onLookupWord(hit, block?.textContent || undefined);
+  };
 
   /** 选区变化即同步工具条：兼容拖选在容器外松开 / 双击 / 键盘 / 程序化选区 */
   const syncSelection = () => {
@@ -324,6 +352,7 @@ export function MarkdownReader(props: MarkdownReaderProps) {
         ref={scrollRef}
         className="relative max-h-[70vh] overflow-auto rounded-b-[28px] bg-[#fffdf7] p-6"
         onMouseUp={handleMouseUp}
+        onClick={handleClick}
       >
         <div
           className={widthMode === 'wide' ? 'mx-auto max-w-none' : 'mx-auto max-w-3xl'}

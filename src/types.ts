@@ -160,3 +160,16 @@ export type IntensiveAnalysis = {
   /** 常见错误 */
   commonMistakes: string[];
 };
+
+/** 点击查词结果：简洁释义（贴合文义置顶）+ 常用搭配 + 动词变位 */
+export type WordLookupResult = {
+  word: string;
+  /** 释义，第一条最贴近上下文 */
+  defs: string[];
+  /** 常用搭配 */
+  collocations: string[];
+  /** 是否为动词 */
+  isVerb: boolean;
+  /** 动词变位（按时态） */
+  conjugation: { tense: string; forms: string[] }[];
+};

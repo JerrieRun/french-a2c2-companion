@@ -6,6 +6,7 @@ type PdfViewerProps = {
   targetPage: number | null;
   jumpSignal: number;
   onIntensiveAnalyze: (text: string) => Promise<void> | void;
+  onLookupWord: (word: string, context?: string) => Promise<void> | void;
   onAddWord: (text: string) => void;
 };
 
@@ -107,6 +108,7 @@ export function PdfViewer(props: PdfViewerProps) {
     targetPage,
     jumpSignal,
     onIntensiveAnalyze,
+    onLookupWord,
     onAddWord,
   } = props;
   const [scale, setScale] = useState(1.15);
@@ -183,6 +185,16 @@ export function PdfViewer(props: PdfViewerProps) {
     setSelection(null);
   };
 
+  // 点击文字层单词 → 查词（仅在无拖选选区时触发）
+  const handleLayerClick = (e: React.MouseEvent) => {
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const span = (e.target as HTMLElement).closest('.pdf-text-layer span') as HTMLElement | null;
+    if (!span) return;
+    const word = (span.textContent || '').trim();
+    if (word) void onLookupWord(word);
+  };
+
   const runAction = async (action: 'analyze' | 'add') => {
     if (!selection) return;
     setSelectionBusy(true);
@@ -231,6 +243,7 @@ export function PdfViewer(props: PdfViewerProps) {
         <div
           className="max-h-[70vh] overflow-auto rounded-2xl bg-slate-100 p-4"
           onMouseUp={handleMouseUp}
+          onClick={handleLayerClick}
         >
           {pages.map(pageNumber => (
             <PdfPage key={pageNumber} pdfDoc={pdfDoc} pageNumber={pageNumber} scale={scale} />
