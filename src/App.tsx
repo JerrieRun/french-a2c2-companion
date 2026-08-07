@@ -3,10 +3,11 @@ import './App.css';
 import pdfWorkerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.js?url';
 import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { UnitPracticeCard } from './components/UnitPracticeCard';
-import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitModulePrompt, buildDeepSeekUrl,
+import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitModulePrompt, buildUnitPracticePrompt, buildDeepSeekUrl,
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
 import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview, saveTextbookMarkdown, loadTextbookMarkdown, clearTextbookMarkdown } from './lib/storage';
 import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
+import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
 import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate } from './types';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
@@ -109,6 +110,7 @@ function App() {
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [unitModuleLoading, setUnitModuleLoading] = useState<number | null>(null);
+  const [practiceLoading, setPracticeLoading] = useState<number | null>(null);
   const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
 
   /* ---- 云端登录与同步 ---- */
@@ -1124,6 +1126,53 @@ function App() {
     }
   };
 
+  /** 生成单元「全题型练习」：DeepSeek 按考级题型生成，无 Key 时用本地模板兜底 */
+  const generateUnitPractice = async (unitIndex: number) => {
+    const unit = materialPreview?.units[unitIndex];
+    if (!unit || practiceLoading === unitIndex || unit.practiceSections) return;
+    setPracticeLoading(unitIndex);
+    try {
+      let practice;
+      if (deepSeekApiKey) {
+        const mdExcerpt = textbookMarkdown && unit.startPage
+          ? extractMarkdownRange(textbookMarkdown, unit.startPage, unit.endPage)
+          : '';
+        const content = await callDeepSeekChat(
+          { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+          '你是一位资深法语考级出题教师（DELF/DALF/TCF），负责为教材单元生成覆盖全部题型的单元练习，讲解用中文。',
+          buildUnitPracticePrompt({
+            unitTitle: unit.title,
+            summary: unit.summary,
+            level: detectLevel(pdfName),
+            excerpt: mdExcerpt || unit.sentences.join(' '),
+            vocab: unit.vocabulary.slice(0, 15).map(v => `${v.text}（${v.translation}）`),
+            grammarTitles: (unit.grammarTopics ?? []).map(t => t.title),
+          }),
+          8192
+        );
+        const normalized = normalizePractice(extractJson(content));
+        const hasAny = !!(normalized.listening || normalized.reading || normalized.grammar || normalized.cloze
+          || normalized.vocabulary || normalized.ordering || normalized.correction || normalized.writing || normalized.oral);
+        practice = hasAny ? normalized : buildLocalPractice(unit);
+      } else {
+        practice = buildLocalPractice(unit);
+      }
+      setMaterialPreview(prev => prev ? {
+        ...prev,
+        units: prev.units.map((u, i) => i === unitIndex ? ({ ...u, practiceSections: practice }) : u),
+      } : prev);
+    } catch (e) {
+      console.error('单元练习生成失败，使用本地模板：', e);
+      const practice = buildLocalPractice(unit);
+      setMaterialPreview(prev => prev ? {
+        ...prev,
+        units: prev.units.map((u, i) => i === unitIndex ? ({ ...u, practiceSections: practice }) : u),
+      } : prev);
+    } finally {
+      setPracticeLoading(null);
+    }
+  };
+
   /** 清除本地保存的教材（PDF + 解析结果），恢复为空状态 */
   const handleClearSavedMaterial = async () => {
     try {
@@ -1540,15 +1589,16 @@ function App() {
     <PathTab
       materialPreview={materialPreview}
       pdfName={pdfName}
+      hasApiKey={!!deepSeekApiKey}
       onOpenUnitInPdf={handleOpenUnitFromPath}
-      onAnalyzeUnitSentence={handleAnalyzeUnitSentenceFromPath}
-      onStartGrammar={handleStartGrammarFromPath}
       onAddUnitWords={handleAddUnitWordsFromPath}
-      onWritingPrompt={handleWritingPromptFromPath}
       onGoMaterials={() => setActiveTab('materials')}
       onGoLearn={() => setActiveTab('learn')}
       onGenerateUnitModule={generateUnitModule}
       unitModuleLoading={unitModuleLoading}
+      onAnalyzeSentence={runDeepSeekAnalysis}
+      onGeneratePractice={generateUnitPractice}
+      practiceLoading={practiceLoading}
       progress={pathProgress}
       onToggleProgress={(unit, lesson) => {
         setPathProgress(prev => {

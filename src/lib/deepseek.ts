@@ -161,3 +161,42 @@ export const extractJson = (text: string): any => {
   }
   throw new Error(`无法解析 DeepSeek 返回的 JSON 内容（返回文本长度 ${cleaned.length} 字符）。`);
 };
+
+/** 生成单元「全题型练习」：覆盖法语考级 DELF B2 / DALF C1 / TCF 主要题型（含写作复述） */
+export const buildUnitPracticePrompt = (args: {
+  unitTitle: string;
+  summary: string;
+  level: string;
+  excerpt: string;
+  vocab: string[];
+  grammarTitles: string[];
+}) => {
+  const { unitTitle, summary, level, excerpt, vocab, grammarTitles } = args;
+  return `System: 你是一位资深法语考级出题教师（DELF B2 / DALF C1 / TCF），请为教材单元生成一套「覆盖全部题型」的单元练习，严格输出合法 JSON（不要用 markdown 代码块包裹）。
+
+输出 JSON 结构（所有题型都要给，不要省略）：
+{
+  "listening": { "instructions": "听力做题指引（中文）", "transcript": "听力文本（法语，取自课文）", "items": [ { "question": "题目（中文），如：根据录音判断正误/选择正确答案", "options": ["A. ...", "B. ...", "C. ..."], "answer": "正确选项或 正确/错误", "explain": "解析（中文）" } ] },
+  "reading": { "passage": "阅读理解短文（法语，取自课文或改写）", "items": [ { "question": "题目", "options": ["A. ...", "B. ...", "C. ..."], "answer": "答案", "explain": "解析" } ] },
+  "grammar": { "items": [ { "question": "语法填空/选择题干（法语），如：Il faut que tu ___ (faire) tes devoirs.", "options": ["fasses", "fais", "faisais"], "answer": "fasses", "explain": "解析" } ] },
+  "cloze": { "title": "完形填空标题", "text": "带空格的短文（法语，用 ____ 表示空格）", "items": [ { "question": "第 1 空的提示（中文，如：动词变位）", "options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": "正确选项", "explain": "解析" } ] },
+  "vocabulary": { "items": [ { "question": "词汇题（法语或中文题干）", "options": ["A. ...", "B. ...", "C. ...", "D. ..."], "answer": "正确选项", "explain": "解析" } ] },
+  "ordering": { "items": [ { "sentences": ["打乱的句子1", "句子2", "句子3", "句子4"], "answer": "正确顺序，如 2-1-4-3", "explain": "解析" } ] },
+  "correction": { "items": [ { "wrong": "错误句", "right": "正确句", "note": "错因说明（中文）" } ] },
+  "writing": { "prompt": "书面表达题目（法语+中文说明，含字数要求；必须包含「写作复述」：复述课文/写摘要/写邮件等，对齐 ${level} 级考纲）", "tips": ["写作提示1", "提示2", "提示3"], "modelAnswer": "参考范文（法语）" },
+  "oral": { "prompt": "口语题目（法语+中文说明，如：就本单元主题做 2-3 分钟独白或复述）", "points": ["要点1", "要点2", "要点3"], "modelAnswer": "参考表达（法语）" }
+}
+
+要求：
+1. 难度对齐 ${level} 级法语考纲（DELF B2 / DALF C1 / TCF 对应题型），题目全部围绕本单元主题、词汇与语法点。
+2. 每类题型 2-4 题；听力/阅读尽量使用本单元课文素材。
+3. 书面表达（writing）必须包含「写作复述」类型（复述课文/摘要/信件/议论文），并给出参考范文。
+4. 所有解析与指令用中文，法语题干保持地道自然。
+5. 本单元语法点：${grammarTitles.join('、') || '（由你根据课文提炼）'}
+
+单元标题：${unitTitle}
+单元摘要：${summary}
+本单元核心词汇：${vocab.join('、')}
+课文/素材（Markdown）：
+${(excerpt || '').slice(0, 6000)}`;
+};

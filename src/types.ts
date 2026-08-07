@@ -56,6 +56,8 @@ export type UnitSection = {
   startPage?: number;
   /** 单元对应的 PDF 结束页（1 基） */
   endPage?: number;
+  /** 单元全题型练习（DeepSeek 生成，覆盖 DELF/DALF/TCF 主要题型） */
+  practiceSections?: UnitPractice;
 };
 
 export type MaterialPreview = {
@@ -96,4 +98,48 @@ export type AnalysisRecord = {
   analyzedAt: string;
   promptPreview?: string;
   practiceExercises?: string[];
+};
+
+/** 练习条目：题干 + 选项 + 答案 + 解析 */
+export type PracticeItem = {
+  question: string;
+  options?: string[];
+  answer: string;
+  explain?: string;
+};
+
+/** 句子重组/排序题 */
+export type OrderingItem = {
+  sentences: string[];
+  answer: string; // 如 "2-1-4-3"
+  explain?: string;
+};
+
+/** 改错题 */
+export type CorrectionItem = {
+  wrong: string;
+  right: string;
+  note?: string;
+};
+
+/** 单元练习：覆盖法语考级（DELF B2 / DALF C1 / TCF）主要题型 */
+export type UnitPractice = {
+  /** 听力理解 */
+  listening?: { instructions: string; transcript?: string; items: PracticeItem[] };
+  /** 阅读理解 */
+  reading?: { passage: string; items: PracticeItem[] };
+  /** 语法与结构 */
+  grammar?: { items: PracticeItem[] };
+  /** 完形填空 */
+  cloze?: { title: string; text: string; items: PracticeItem[] };
+  /** 词汇与表达 */
+  vocabulary?: { items: PracticeItem[] };
+  /** 句子重组 */
+  ordering?: { items: OrderingItem[] };
+  /** 改错 */
+  correction?: { items: CorrectionItem[] };
+  /** 书面表达（含写作复述） */
+  writing?: { prompt: string; tips: string[]; modelAnswer: string };
+  /** 口语表达（含复述/独白） */
+  oral?: { prompt: string; points: string[]; modelAnswer: string };
 };
