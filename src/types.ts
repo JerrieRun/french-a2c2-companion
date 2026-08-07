@@ -146,3 +146,17 @@ export type UnitPractice = {
   /** 口语表达（含复述/独白） */
   oral?: { prompt: string; promptZh?: string; points: string[]; modelAnswer: string };
 };
+
+/** 精读「精析」结果：先中文翻译，再句型精析（分析此句 + 语法亮点 + 常见错误） */
+export type IntensiveAnalysis = {
+  /** 原文（选中的法语文本） */
+  sentence: string;
+  /** 中文翻译（先翻译） */
+  translation: string;
+  /** 分析此句：句意 / 结构说明 */
+  summary: string;
+  /** 语法亮点 */
+  grammarPoints: string[];
+  /** 常见错误 */
+  commonMistakes: string[];
+};

@@ -8,7 +8,7 @@ import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitMo
 import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview, saveTextbookMarkdown, loadTextbookMarkdown, clearTextbookMarkdown } from './lib/storage';
 import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
-import type { AnalysisRecord, AnalysisResult, GrammarExercise, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate } from './types';
+import type { AnalysisRecord, AnalysisResult, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate } from './types';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
 import { AuthModal } from './components/AuthModal';
@@ -65,6 +65,9 @@ function App() {
   const [mdError, setMdError] = useState<string | null>(null);
   const [mdSource, setMdSource] = useState<'auto' | 'imported' | null>(null);
   const [translationResult, setTranslationResult] = useState<string | null>(null);
+  // 精析（翻译 + 句型精析合并）
+  const [intensiveResult, setIntensiveResult] = useState<IntensiveAnalysis | null>(null);
+  const [intensiveLoading, setIntensiveLoading] = useState(false);
   const [translationLoading, setTranslationLoading] = useState(false);
   const [wordDetailResult, setWordDetailResult] = useState<string | null>(null);
   const [wordDetailLoading, setWordDetailLoading] = useState(false);
@@ -1308,6 +1311,61 @@ function App() {
     });
   };
 
+  /** 精读「精析」：先中文翻译，再按句型精析格式输出（分析此句 + 语法亮点 + 常见错误） */
+  const runIntensiveAnalysis = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    setIntensiveLoading(true);
+    setIntensiveResult(null);
+    try {
+      let translation: string;
+      if (deepSeekApiKey) {
+        try {
+          translation = (await callDeepSeekChat(
+            { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+            '你是一位法语翻译助手。请把用户输入的法语内容翻译成准确自然的中文；若输入是中文则翻译成法语。只输出译文，不要额外解释。',
+            trimmed,
+            1024
+          )).trim();
+        } catch {
+          translation = `（本地逐词翻译）${translateSentence(trimmed)}`;
+        }
+      } else {
+        translation = `（本地逐词翻译）${translateSentence(trimmed)}`;
+      }
+      const analysis = await runDeepSeekAnalysis(trimmed);
+      setIntensiveResult({
+        sentence: trimmed,
+        translation,
+        summary: analysis.summary,
+        grammarPoints: analysis.grammarPoints,
+        commonMistakes: analysis.commonMistakes,
+      });
+      const record: AnalysisRecord = {
+        sentence: trimmed,
+        summary: analysis.summary,
+        grammarPoints: analysis.grammarPoints,
+        commonMistakes: analysis.commonMistakes,
+        analyzedAt: new Date().toISOString(),
+        promptPreview: analysis.debug?.promptPreview,
+      };
+      setAnalysisHistory(prev => [record, ...prev].slice(0, 12));
+    } catch (e) {
+      console.error('精析失败：', e);
+      setIntensiveResult({
+        sentence: trimmed,
+        translation: '（翻译失败）',
+        summary: '分析失败，请检查网络或后端配置。',
+        grammarPoints: [],
+        commonMistakes: [],
+      });
+    } finally {
+      setIntensiveLoading(false);
+    }
+  };
+
+  const handleCloseIntensive = () => setIntensiveResult(null);
+
   const runSelectedTextTranslation = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -1646,7 +1704,6 @@ function App() {
       wordBook={ wordBook }
       deepSeekStudyPlan={ deepSeekStudyPlan }
       deepSeekModeLabel={ deepSeekModeLabel }
-      analysisResult={ analysisResult }
       analysisPrompt={ analysisPrompt }
       practiceExercises={ practiceExercises }
       practicePrompt={ practicePrompt }
@@ -1677,14 +1734,8 @@ function App() {
       pdfDoc={ pdfDoc }
       pdfTargetPage={ pdfTargetPage }
       pdfJumpSignal={ pdfJumpSignal }
-      onTranslateText={ runSelectedTextTranslation }
-      onAnalyzeText={ runSelectedTextAnalysis }
-      onWordDetail={ runSelectedWordDetail }
+      onIntensiveAnalyze={ runIntensiveAnalysis }
       onAddWord={ handleAddSelectedWord }
-      translationResult={ translationResult }
-      translationLoading={ translationLoading }
-      wordDetailResult={ wordDetailResult }
-      wordDetailLoading={ wordDetailLoading }
       handleSentenceSelect={ handleSentenceSelect }
       handleAddToWordBook={ handleAddToWordBook }
       handleAnalyzeSentence={ handleAnalyzeSentence }
@@ -1703,9 +1754,9 @@ function App() {
       onGenerateMarkdown={ () => void generateTextbookMarkdown() }
       onImportMarkdown={ handleImportMarkdown }
       onJumpToPdfPage={ handleJumpToPdfPage }
-      onCloseTranslation={ () => setTranslationResult(null) }
-      onCloseWordDetail={ () => setWordDetailResult(null) }
-      onCloseAnalysis={ () => setAnalysisResult(null) }
+      intensiveResult={ intensiveResult }
+      intensiveLoading={ intensiveLoading }
+      onCloseIntensive={ handleCloseIntensive }
       handleGeneratePractice={ handleGeneratePractice }
       testDeepSeekConnection={ testDeepSeekConnection }
       translateSentence={ translateSentence }

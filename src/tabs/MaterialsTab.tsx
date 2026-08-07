@@ -6,7 +6,7 @@ import { MarkdownReader } from '../components/MarkdownReader';
 import { ResultFloatingPanel } from '../components/ResultFloatingPanel';
 import { UnitSummaryCard } from '../components/UnitSummaryCard';
 import { UnitStudyModule } from '../components/UnitStudyModule';
-import type { AnalysisResult, MaterialPreview, UnitSection, WordCandidate } from '../types';
+import type { AnalysisResult, IntensiveAnalysis, MaterialPreview, UnitSection, WordCandidate } from '../types';
 
 type ParseMode = 'auto' | 'deepseek' | 'local';
 
@@ -30,7 +30,6 @@ type MaterialsTabProps = {
   // DeepSeek 相关
   deepSeekStudyPlan: string[];
   deepSeekModeLabel: string;
-  analysisResult: AnalysisResult | null;
   analysisPrompt: string | null;
   practiceExercises: string[];
   practicePrompt: string | null;
@@ -62,14 +61,8 @@ type MaterialsTabProps = {
   pdfDoc: PDFDocumentProxy | null;
   pdfTargetPage: number | null;
   pdfJumpSignal: number;
-  onTranslateText: (text: string) => Promise<void>;
-  onAnalyzeText: (text: string) => Promise<void>;
-  onWordDetail: (text: string) => Promise<void>;
+  onIntensiveAnalyze: (text: string) => Promise<void>;
   onAddWord: (text: string) => void;
-  translationResult: string | null;
-  translationLoading: boolean;
-  wordDetailResult: string | null;
-  wordDetailLoading: boolean;
   handleUnitSelect: (index: number) => void;
   handleSentenceSelect: (index: number) => void;
   handleAddToWordBook: (candidate: WordCandidate) => void;
@@ -94,10 +87,10 @@ type MaterialsTabProps = {
   onGenerateMarkdown: () => void;
   onImportMarkdown: (text: string, name?: string) => Promise<void>;
   onJumpToPdfPage: (page: number) => void;
-  // 结果悬浮面板关闭
-  onCloseTranslation: () => void;
-  onCloseWordDetail: () => void;
-  onCloseAnalysis: () => void;
+  // 精析结果悬浮面板
+  intensiveResult: IntensiveAnalysis | null;
+  intensiveLoading: boolean;
+  onCloseIntensive: () => void;
 };
 
 export function MaterialsTab(props: MaterialsTabProps) {
@@ -106,7 +99,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     materialPreview, selectedUnit, selectedUnitIndex,
     sentenceCount, selectedSentence,
     wordBook, deepSeekStudyPlan, deepSeekModeLabel,
-    analysisResult, analysisPrompt, practiceExercises, practicePrompt,
+    analysisPrompt, practiceExercises, practicePrompt,
     deepSeekParsePrompt, deepSeekParseResponse, deepSeekTestStatus, deepSeekTesting,
     deepSeekApiKey, setDeepSeekApiKey, deepSeekModel, setDeepSeekModel,
     deepSeekOfficialUrl, setDeepSeekOfficialUrl, deepSeekApiUrl, setDeepSeekApiUrl,
@@ -116,12 +109,11 @@ export function MaterialsTab(props: MaterialsTabProps) {
     handleFileChange, handleUnitSelect,
     handleAnalyzeSentence, handleGeneratePractice, testDeepSeekConnection, translateSentence,
     pdfDoc, pdfTargetPage, pdfJumpSignal,
-    onTranslateText, onAnalyzeText, onWordDetail, onAddWord,
-    translationResult, translationLoading, wordDetailResult, wordDetailLoading,
+    onIntensiveAnalyze, onAddWord,
     onGenerateUnitModule, unitModuleLoading, restoreNotice, onDismissRestoreNotice, onClearSavedMaterial,
     readerMode, setReaderMode, textbookMarkdown, mdStatus, mdProgress, mdError, mdSource,
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
-    onCloseTranslation, onCloseWordDetail, onCloseAnalysis,
+    intensiveResult, intensiveLoading, onCloseIntensive,
   } = props;
   const importMdRef = useRef<HTMLInputElement>(null);
 
@@ -194,9 +186,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
           pdfDoc={pdfDoc}
           targetPage={pdfTargetPage}
           jumpSignal={pdfJumpSignal}
-          onTranslateText={onTranslateText}
-          onAnalyzeText={onAnalyzeText}
-          onWordDetail={onWordDetail}
+          onIntensiveAnalyze={onIntensiveAnalyze}
           onAddWord={onAddWord}
         />
       ) : textbookMarkdown ? (
@@ -206,9 +196,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
           sourceLabel={mdSource === 'imported' ? '已导入文件' : '内置 PDF→Markdown 转换'}
           units={materialPreview?.units ?? []}
           onJumpToPdfPage={onJumpToPdfPage}
-          onTranslateText={onTranslateText}
-          onAnalyzeText={onAnalyzeText}
-          onWordDetail={onWordDetail}
+          onIntensiveAnalyze={onIntensiveAnalyze}
           onAddWord={onAddWord}
           onImportMarkdown={onImportMarkdown}
         />
@@ -595,15 +583,9 @@ export function MaterialsTab(props: MaterialsTabProps) {
       )}
       {/* 精读结果悬浮面板：翻译 / 详解 / 句型分析 */}
       <ResultFloatingPanel
-        translation={translationResult}
-        translationLoading={translationLoading}
-        wordDetail={wordDetailResult}
-        wordDetailLoading={wordDetailLoading}
-        analysis={analysisResult}
-        analysisLoading={loading}
-        onCloseTranslation={onCloseTranslation}
-        onCloseWordDetail={onCloseWordDetail}
-        onCloseAnalysis={onCloseAnalysis}
+        intensive={intensiveResult}
+        loading={intensiveLoading}
+        onClose={onCloseIntensive}
       />
     </>
   );

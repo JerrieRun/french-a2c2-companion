@@ -5,9 +5,7 @@ type PdfViewerProps = {
   pdfDoc: PDFDocumentProxy | null;
   targetPage: number | null;
   jumpSignal: number;
-  onTranslateText: (text: string) => Promise<void> | void;
-  onAnalyzeText: (text: string) => Promise<void> | void;
-  onWordDetail: (text: string) => Promise<void> | void;
+  onIntensiveAnalyze: (text: string) => Promise<void> | void;
   onAddWord: (text: string) => void;
 };
 
@@ -108,9 +106,7 @@ export function PdfViewer(props: PdfViewerProps) {
     pdfDoc,
     targetPage,
     jumpSignal,
-    onTranslateText,
-    onAnalyzeText,
-    onWordDetail,
+    onIntensiveAnalyze,
     onAddWord,
   } = props;
   const [scale, setScale] = useState(1.15);
@@ -187,13 +183,11 @@ export function PdfViewer(props: PdfViewerProps) {
     setSelection(null);
   };
 
-  const runAction = async (action: 'translate' | 'analyze' | 'word' | 'add') => {
+  const runAction = async (action: 'analyze' | 'add') => {
     if (!selection) return;
     setSelectionBusy(true);
     try {
-      if (action === 'translate') await onTranslateText(selection.text);
-      else if (action === 'analyze') await onAnalyzeText(selection.text);
-      else if (action === 'word') await onWordDetail(selection.text);
+      if (action === 'analyze') await onIntensiveAnalyze(selection.text);
       else onAddWord(selection.text);
     } finally {
       setSelectionBusy(false);
@@ -211,7 +205,7 @@ export function PdfViewer(props: PdfViewerProps) {
         <div>
           <h3 className="text-lg font-semibold text-slate-900">📄 教材原页预览</h3>
           <p className="mt-1 text-xs text-slate-500">
-            在下方 PDF 上划线选中段落 / 句子 / 单词，即可翻译、解析句型、单词详解或加入生词本。
+            在下方 PDF 上划线选中段落 / 句子 / 单词，即可「精析」（先翻译再拆解句法）或加入生词本。
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -254,26 +248,10 @@ export function PdfViewer(props: PdfViewerProps) {
             <button
               type="button"
               disabled={selectionBusy}
-              onClick={() => runAction('translate')}
-              className="rounded-xl bg-sky/30 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-sky/50"
-            >
-              🌐 翻译
-            </button>
-            <button
-              type="button"
-              disabled={selectionBusy}
               onClick={() => runAction('analyze')}
               className="rounded-xl bg-lavender/40 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-lavender/70"
             >
-              🧩 句型
-            </button>
-            <button
-              type="button"
-              disabled={selectionBusy}
-              onClick={() => runAction('word')}
-              className="rounded-xl bg-blush/40 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-blush/70"
-            >
-              📖 详解
+              🧩 精析
             </button>
             <button
               type="button"

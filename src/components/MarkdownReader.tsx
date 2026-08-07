@@ -11,9 +11,7 @@ type MarkdownReaderProps = {
   sourceLabel: string;
   units: { title: string; startPage?: number; endPage?: number }[];
   onJumpToPdfPage: (page: number) => void;
-  onTranslateText: (text: string) => Promise<void>;
-  onAnalyzeText: (text: string) => Promise<void>;
-  onWordDetail: (text: string) => Promise<void>;
+  onIntensiveAnalyze: (text: string) => Promise<void>;
   onAddWord: (text: string) => void;
   onImportMarkdown: (text: string, name?: string) => Promise<void>;
 };
@@ -73,9 +71,7 @@ export function MarkdownReader(props: MarkdownReaderProps) {
     sourceLabel,
     units,
     onJumpToPdfPage,
-    onTranslateText,
-    onAnalyzeText,
-    onWordDetail,
+    onIntensiveAnalyze,
     onAddWord,
     onImportMarkdown,
   } = props;
@@ -163,13 +159,11 @@ export function MarkdownReader(props: MarkdownReaderProps) {
     window.setTimeout(syncSelection, 10);
   };
 
-  const runAction = async (action: 'translate' | 'analyze' | 'word' | 'add') => {
+  const runAction = async (action: 'analyze' | 'add') => {
     if (!selection) return;
     setActionBusy(true);
     try {
-      if (action === 'translate') await onTranslateText(selection.text);
-      else if (action === 'analyze') await onAnalyzeText(selection.text);
-      else if (action === 'word') await onWordDetail(selection.text);
+      if (action === 'analyze') await onIntensiveAnalyze(selection.text);
       else onAddWord(selection.text);
     } finally {
       setActionBusy(false);
@@ -375,26 +369,10 @@ export function MarkdownReader(props: MarkdownReaderProps) {
             <button
               type="button"
               disabled={actionBusy}
-              onClick={() => void runAction('translate')}
-              className="rounded-xl bg-sky/30 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-sky/50"
-            >
-              🌐 翻译
-            </button>
-            <button
-              type="button"
-              disabled={actionBusy}
               onClick={() => void runAction('analyze')}
               className="rounded-xl bg-lavender/40 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-lavender/70"
             >
-              🧩 句型
-            </button>
-            <button
-              type="button"
-              disabled={actionBusy}
-              onClick={() => void runAction('word')}
-              className="rounded-xl bg-blush/40 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-blush/70"
-            >
-              📖 详解
+              🧩 精析
             </button>
             <button
               type="button"
