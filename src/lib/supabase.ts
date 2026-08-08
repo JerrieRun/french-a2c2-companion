@@ -238,10 +238,37 @@ export async function pushUserData(key: SyncKey, value: unknown): Promise<void> 
   if (!res.ok) throw new Error(`同步失败（${res.status}）`);
 }
 
-/* ---------- 教材存储（Supabase Storage，跨设备恢复） ---------- */
+/* ---------- 教材存储（Supabase Storage，跨设备恢复，支持多本教材） ----------
+ *
+ * 目录结构（每本教材一个子目录，manifest.json 记录教材清单）：
+ *   user/<uid>/textbooks/manifest.json
+ *   user/<uid>/textbooks/<bookId>/textbook.pdf
+ *   user/<uid>/textbooks/<bookId>/textbook.md
+ *   user/<uid>/textbooks/<bookId>/preview.json   （解析结果：单元列表，供课程路径/跨设备恢复）
+ *   user/<uid>/textbooks/<bookId>/meta.json      （原始文件名等元数据）
+ *
+ * 免费档单文件上限 50MB：PDF 超限时仍可上传 Markdown + 解析结果，保证跨设备可精读。
+ */
 
 const TEXTBOOK_BUCKET = 'textbooks';
-const textbookPath = (uid: string, file: string) => `user/${uid}/${file}`;
+
+export type CloudBookMeta = {
+  id: string;
+  name: string;
+  level: string;
+  pages: number;
+  sentenceCount: number;
+  unitCount: number;
+  source: 'pdf' | 'md';
+  savedAt: string;
+  size: number;
+  hasPdf: boolean;
+  hasMd: boolean;
+  hasPreview: boolean;
+};
+
+const bookPath = (uid: string, bookId: string, file: string) => `user/${uid}/textbooks/${bookId}/${file}`;
+const manifestPath = (uid: string) => `user/${uid}/textbooks/manifest.json`;
 
 function storageHeaders(): Record<string, string> {
   const session = getStoredSession();
@@ -251,118 +278,129 @@ function storageHeaders(): Record<string, string> {
   };
 }
 
-/** 检查当前用户云端是否已有教材文件 */
-export async function hasTextbook(uid: string): Promise<{ pdf: boolean; md: boolean }> {
-  const res = await requestJson(`/storage/v1/object/list/${TEXTBOOK_BUCKET}`, {
-    method: 'POST',
-    headers: { ...storageHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prefix: `user/${uid}/`, limit: 100 }),
-  });
-  if (!res.ok) return { pdf: false, md: false };
-  const rows = (await res.json()) as Array<{ name: string }>;
-  const names = new Set(rows.map(r => r.name));
-  return {
-    pdf: names.has(textbookPath(uid, 'textbook.pdf')),
-    md: names.has(textbookPath(uid, 'textbook.md')),
-  };
-}
-
-/** 上传教材 PDF（二进制）到当前用户目录；x-upsert 支持覆盖 */
-export async function uploadTextbookPdf(uid: string, data: ArrayBuffer, fileName: string): Promise<void> {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.pdf')}`, {
+/** 上传/覆盖一个文件到当前用户教材目录；失败时抛出带状态码与响应体的错误 */
+export async function uploadCloudBookFile(
+  uid: string,
+  bookId: string,
+  file: string,
+  data: ArrayBuffer | string,
+  contentType: string
+): Promise<void> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${bookPath(uid, bookId, file)}`, {
     method: 'POST',
     headers: {
       ...storageHeaders(),
-      'Content-Type': 'application/pdf',
+      'Content-Type': contentType,
       'x-upsert': 'true',
-      'x-file-name': encodeURIComponent(fileName),
     },
     body: data,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`教材上传失败（${res.status}）${text.slice(0, 120)}`);
+    throw new Error(`上传 ${file} 失败（HTTP ${res.status}）${text.slice(0, 200)}`);
   }
 }
 
-/** 上传教材 Markdown（精读文本） */
-export async function uploadTextbookMarkdown(uid: string, markdown: string): Promise<void> {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.md')}`, {
+/** 上传教材清单（与云端已有清单合并，避免覆盖其他教材） */
+export async function uploadCloudManifest(uid: string, entries: CloudBookMeta[]): Promise<void> {
+  let existing: CloudBookMeta[] = [];
+  try {
+    const old = await fetchCloudManifest(uid);
+    if (old) existing = old;
+  } catch {
+    /* 拉取失败时以本地为准 */
+  }
+  const merged = [...existing];
+  for (const entry of entries) {
+    const idx = merged.findIndex(b => b.id === entry.id);
+    if (idx >= 0) merged[idx] = entry;
+    else merged.push(entry);
+  }
+  // 清单固定位于 user/<uid>/textbooks/manifest.json（不能走 bookPath，否则会变成 .../manifest/manifest.json）
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${manifestPath(uid)}`, {
     method: 'POST',
     headers: {
       ...storageHeaders(),
-      'Content-Type': 'text/markdown',
+      'Content-Type': 'application/json',
       'x-upsert': 'true',
     },
-    body: markdown,
+    body: JSON.stringify(merged),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`教材 Markdown 上传失败（${res.status}）${text.slice(0, 120)}`);
+    throw new Error(`上传教材清单失败（HTTP ${res.status}）${text.slice(0, 200)}`);
   }
 }
 
-/** 下载云端教材 PDF；不存在返回 null */
-export async function downloadTextbookPdf(uid: string): Promise<{ data: ArrayBuffer; fileName: string } | null> {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.pdf')}`, {
+export async function fetchCloudManifest(uid: string): Promise<CloudBookMeta[] | null> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${manifestPath(uid)}`, {
     headers: storageHeaders(),
   });
   if (res.status === 404 || res.status === 400) return null;
-  if (!res.ok) throw new Error(`教材下载失败（${res.status}）`);
-  const encoded = res.headers.get('x-file-name') || '';
-  let fileName = 'textbook.pdf';
+  if (!res.ok) throw new Error(`读取教材清单失败（HTTP ${res.status}）`);
   try {
-    fileName = encoded ? decodeURIComponent(encoded) : fileName;
-  } catch {
-    /* ignore */
-  }
-  return { data: await res.arrayBuffer(), fileName };
-}
-
-/** 下载云端教材 Markdown；不存在返回 null */
-export async function downloadTextbookMarkdown(uid: string): Promise<string | null> {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.md')}`, {
-    headers: storageHeaders(),
-  });
-  if (res.status === 404 || res.status === 400) return null;
-  if (!res.ok) throw new Error(`教材 Markdown 下载失败（${res.status}）`);
-  return await res.text();
-}
-
-/** 上传教材原始文件名（meta.json），跨设备恢复时保留原名 */
-export async function uploadTextbookMeta(uid: string, name: string): Promise<void> {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'meta.json')}`, {
-    method: 'POST',
-    headers: { ...storageHeaders(), 'Content-Type': 'application/json', 'x-upsert': 'true' },
-    body: JSON.stringify({ name }),
-  });
-  if (!res.ok) throw new Error(`教材元数据上传失败（${res.status}）`);
-}
-
-/** 读取教材原始文件名；没有则返回 null */
-export async function downloadTextbookMeta(uid: string): Promise<string | null> {
-  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'meta.json')}`, {
-    headers: storageHeaders(),
-  });
-  if (res.status === 404 || res.status === 400) return null;
-  if (!res.ok) return null;
-  try {
-    const data = (await res.json()) as { name?: string };
-    return data.name || null;
+    const data = (await res.json()) as CloudBookMeta[];
+    return Array.isArray(data) ? data : null;
   } catch {
     return null;
   }
 }
 
-/** 删除当前用户的云端教材（PDF + Markdown） */
-export async function deleteTextbook(uid: string): Promise<void> {
-  const paths = [textbookPath(uid, 'textbook.pdf'), textbookPath(uid, 'textbook.md')];
+/** 下载某个云端文件；不存在返回 null */
+export async function downloadCloudBookFile(
+  uid: string,
+  bookId: string,
+  file: string
+): Promise<ArrayBuffer | string | null> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${bookPath(uid, bookId, file)}`, {
+    headers: storageHeaders(),
+  });
+  if (res.status === 404 || res.status === 400) return null;
+  if (!res.ok) throw new Error(`下载 ${file} 失败（HTTP ${res.status}）`);
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('json') || ct.includes('text') || ct.includes('markdown')) {
+    return await res.text();
+  }
+  return await res.arrayBuffer();
+}
+
+/** 下载某本教材的解析结果（MaterialPreview JSON） */
+export async function downloadCloudBookPreview(uid: string, bookId: string): Promise<unknown | null> {
+  const raw = await downloadCloudBookFile(uid, bookId, 'preview.json');
+  if (typeof raw !== 'string') return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+/** 删除某本教材的云端全部文件（含清单条目） */
+export async function deleteCloudBook(uid: string, bookId: string): Promise<void> {
+  const files = ['textbook.pdf', 'textbook.md', 'preview.json', 'meta.json'];
   await Promise.all(
-    paths.map(path =>
-      fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${path}`, {
+    files.map(file =>
+      fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${bookPath(uid, bookId, file)}`, {
         method: 'DELETE',
         headers: storageHeaders(),
-      })
+      }).catch(() => undefined)
     )
   );
+  // 更新清单：移除该教材
+  const manifest = await fetchCloudManifest(uid).catch(() => null);
+  if (manifest) {
+    const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${manifestPath(uid)}`, {
+      method: 'POST',
+      headers: {
+        ...storageHeaders(),
+        'Content-Type': 'application/json',
+        'x-upsert': 'true',
+      },
+      body: JSON.stringify(manifest.filter(b => b.id !== bookId)),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`更新教材清单失败（HTTP ${res.status}）${text.slice(0, 200)}`);
+    }
+  }
 }

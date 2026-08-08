@@ -3,6 +3,10 @@
 > 更新规则：完成一项就勾选 `[x]` 并附日期；新想法追加到「待办」。下次继续开发先看本文件与 AGENTS.md。
 
 ## ✅ 已完成
+- [x] 多教材支持（2026-08-08）：教材库（IndexedDB 按教材 id 存 PDF/Markdown/解析结果 + localStorage 存元数据）；Supabase 云端按 `user/<uid>/textbooks/<bookId>/` 存多本教材 + manifest 清单；教材中心教材库列表/打开/删除；精读页教材切换器；课程路径每本教材一条课程、进度按教材隔离（`bookId:u:l`）；旧版单教材自动迁移
+- [x] 单元识别修复（2026-08-08）：本地拆分重写（目录页码定位 + 页首标记兜底，支持 Unité/Dossier/Leçon/Chapitre/Séquence/Mission/第X单元）；auto 模式大教材不再截断给 DeepSeek、返回不完整时回退本地；Édito A2 实测 12 单元、页码与目录完全一致（13/27/41…/167）
+- [x] 云端同步错误可视化 + 50MB 兜底（2026-08-08）：上传失败显示真实状态码/响应体；PDF 超过免费档 50MB 时仍同步 Markdown+解析结果，保证跨设备可精读；教材库行显示云端同步状态与「重新同步」按钮
+- [x] 纯逻辑模块抽取（2026-08-08）：src/lib/words.ts（词频/CEFR/翻译）、src/lib/units.ts（本地单元拆分），新增 10 个单元测试（共 29 个全过）
 - [x] React + Vite + Tailwind 基础框架，暖色主题
 - [x] 顶部导航 + 三个 Tab（学习 / 教材中心 / 进度）
 - [x] PDF 上传与文本提取（pdfjs-dist），教材中心展示解析结果

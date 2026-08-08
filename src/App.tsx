@@ -5,19 +5,32 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { UnitPracticeCard } from './components/UnitPracticeCard';
 import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitModulePrompt, buildUnitPracticePrompt, buildDeepSeekUrl,
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
-import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview, saveTextbookMarkdown, loadTextbookMarkdown, clearTextbookMarkdown } from './lib/storage';
+import {
+  clearPdfFile, clearPreview, deleteTextbookMarkdownFor, deleteTextbookPdf, deleteTextbookPreviewFor,
+  loadPdfFile, loadPreview, loadTextbookLibrary, loadTextbookMarkdown, loadTextbookMarkdownFor,
+  loadTextbookPdf, loadTextbookPreviewFor, saveTextbookLibrary, saveTextbookMarkdownFor,
+  saveTextbookPdf, saveTextbookPreviewFor,
+} from './lib/storage';
 import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import { compressPdf } from './lib/pdfCompress';
+import { buildLocalMaterialPreview, buildLocalUnitsFromText } from './lib/units';
+import { extractWordCandidates, getCeFrTag, translateSentence, translateWord } from './lib/words';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
-import type { AnalysisRecord, AnalysisResult, FlashcardSrs, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate, WordLookupResult } from './types';
+import type { AnalysisRecord, AnalysisResult, FlashcardSrs, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, TextbookMeta, UnitSection, WordCandidate, WordLookupResult } from './types';
 import { createSrs, gradeSrs } from './lib/srs';
 import { useDebouncedCloudSync, useLocalStorageState } from './lib/hooks';
 import type { SrsGrade } from './lib/srs';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
 import { AuthModal } from './components/AuthModal';
-import { downloadTextbookMarkdown, downloadTextbookMeta, downloadTextbookPdf, fetchAllUserData, getCurrentUser, hasTextbook, pushUserData, signInWithEmail, signOut, signUpWithEmail, supabaseConfigured, SYNC_KEYS, uploadTextbookMarkdown, uploadTextbookMeta, uploadTextbookPdf } from './lib/supabase';
+import {
+  deleteCloudBook, downloadCloudBookFile, downloadCloudBookPreview, fetchAllUserData, fetchCloudManifest,
+  getCurrentUser, pushUserData, signInWithEmail, signOut, signUpWithEmail, supabaseConfigured,
+  SYNC_KEYS, uploadCloudBookFile, uploadCloudManifest,
+} from './lib/supabase';
 import type { SupabaseUser, SyncKey } from './lib/supabase';
+
+
 
 /** 无 DeepSeek Key 时的离线语法练习兜底 */
 /** 解析 CSV 行（支持双引号包裹与转义） */
@@ -158,6 +171,10 @@ function App() {
   const [syncStatus, setSyncStatus] = useState<'off' | 'syncing' | 'synced' | 'error'>('off');
   // 教材云端同步状态（PDF + Markdown 上传 Supabase Storage）
   const [textbookSync, setTextbookSync] = useState<'off' | 'syncing' | 'synced' | 'error'>('off');
+  // 多教材：教材库元数据 + 当前活动教材 + 云端同步真实错误
+  const [textbookLibrary, setTextbookLibrary] = useLocalStorageState<TextbookMeta[]>('french-textbook-library', []);
+  const [activeBookId, setActiveBookId] = useState<string | null>(null);
+  const [textbookSyncError, setTextbookSyncError] = useState<string | null>(null);
   // 大文件自动压缩
   const [compressing, setCompressing] = useState(false);
   const [compressProgress, setCompressProgress] = useState<{ done: number; total: number } | null>(null);
@@ -198,7 +215,7 @@ function App() {
         setAuthUser(user);
         if (user) {
           await applyCloudToLocal();
-          void restoreTextbookFromCloud(user);
+          void syncTextbooksFromCloud(user);
         }
       } catch (e) {
         console.warn('恢复登录状态失败：', e);
@@ -237,9 +254,6 @@ function App() {
             case 'french-path-progress':
               setPathProgress(value as PathProgress);
               break;
-            case 'french-preview':
-              setMaterialPreview(value as MaterialPreview);
-              break;
           }
         } else {
           const raw = window.localStorage.getItem(key);
@@ -259,47 +273,122 @@ function App() {
     }
   };
 
-  /** 把本地教材上传到当前用户云端（PDF + 原始文件名） */
-  const uploadTextbookToCloud = async (user: SupabaseUser, pdf: ArrayBuffer, fileName: string) => {
+  /** 更新教材库元数据（localStorage + state） */
+  const updateLibraryMeta = (id: string, patch: Partial<TextbookMeta>) => {
+    const lib = loadTextbookLibrary().map(b => (b.id === id ? { ...b, ...patch } : b));
+    saveTextbookLibrary(lib);
+    setTextbookLibrary(lib);
+  };
+
+  /** 更新某本教材的解析结果（IndexedDB + 活动教材 state + 库元数据） */
+  const updateBookPreview = async (bookId: string, updater: (p: MaterialPreview) => MaterialPreview) => {
+    const preview = await loadTextbookPreviewFor(bookId);
+    if (!preview) return;
+    const next = updater(preview);
+    await saveTextbookPreviewFor(bookId, next);
+    if (bookId === activeBookId) setMaterialPreview(next);
+    updateLibraryMeta(bookId, { unitCount: next.units.length, pages: next.pages, sentenceCount: next.sentences.length });
+  };
+
+  /** 把某本教材上传到云端（PDF / Markdown / 解析结果 + 清单）。
+   *  PDF 超 50MB 免费上限失败时仍上传解析结果，保证跨设备可精读，并把真实错误暴露给 UI。 */
+  const uploadBookToCloud = async (
+    user: SupabaseUser,
+    bookId: string,
+    files?: { pdf?: ArrayBuffer; md?: string; preview?: MaterialPreview }
+  ) => {
     try {
       setTextbookSync('syncing');
-      await uploadTextbookPdf(user.id, pdf, fileName);
-      try { await uploadTextbookMeta(user.id, fileName); } catch { /* 元数据失败不影响主文件 */ }
+      setTextbookSyncError(null);
+      const book = loadTextbookLibrary().find(b => b.id === bookId);
+      if (!book) return;
+      const flags = { hasPdf: book.hasPdf, hasMd: book.hasMd, hasPreview: book.hasPreview };
+      if (files?.pdf) {
+        try {
+          await uploadCloudBookFile(user.id, bookId, 'textbook.pdf', files.pdf, 'application/pdf');
+          flags.hasPdf = true;
+        } catch (e) {
+          console.warn('PDF 云端上传失败（可能超过 50MB 免费上限）：', e);
+          flags.hasPdf = false;
+          setTextbookSyncError(`PDF 未上传云端（${e instanceof Error ? e.message : String(e)}）。教材仍保存在本机，可正常精读。`);
+        }
+      }
+      if (files?.md) {
+        try {
+          await uploadCloudBookFile(user.id, bookId, 'textbook.md', files.md, 'text/markdown');
+          flags.hasMd = true;
+        } catch (e) {
+          console.warn('Markdown 云端上传失败：', e);
+        }
+      }
+      if (files?.preview) {
+        try {
+          await uploadCloudBookFile(user.id, bookId, 'preview.json', JSON.stringify(files.preview), 'application/json');
+          flags.hasPreview = true;
+        } catch (e) {
+          console.warn('解析结果云端上传失败：', e);
+        }
+      }
+      await uploadCloudBookFile(user.id, bookId, 'meta.json', JSON.stringify({ name: book.name }), 'application/json');
+      const updated: TextbookMeta = { ...book, ...flags };
+      updateLibraryMeta(bookId, flags);
+      await uploadCloudManifest(user.id, [updated]);
       setTextbookSync('synced');
     } catch (e) {
       console.warn('教材上传云端失败：', e);
       setTextbookSync('error');
+      setTextbookSyncError(e instanceof Error ? e.message : String(e));
     }
   };
 
-  /** 把精读 Markdown 上传到云端（供跨设备直接精读，无需重新转换） */
-  const uploadMarkdownToCloud = async (user: SupabaseUser, markdown: string) => {
+  /** 登录后同步教材库：上传本地有云端没有的；把云端有本地没有的加入教材库 */
+  const syncTextbooksFromCloud = async (user: SupabaseUser) => {
     try {
-      await uploadTextbookMarkdown(user.id, markdown);
-    } catch (e) {
-      console.warn('Markdown 上传云端失败：', e);
-    }
-  };
-
-  /** 登录后尝试从云端恢复教材（本地已有则跳过） */
-  const restoreTextbookFromCloud = async (user: SupabaseUser) => {
-    try {
-      const has = await hasTextbook(user.id);
-      if (!has.pdf) return;
-      const saved = await loadPdfFile();
-      if (saved) return; // 本机已有教材，以本地为准
       setTextbookSync('syncing');
-      const pdf = await downloadTextbookPdf(user.id);
-      if (!pdf) return;
-      const metaName = await downloadTextbookMeta(user.id);
-      await savePdfFile(metaName || pdf.fileName, pdf.data);
-      const md = await downloadTextbookMarkdown(user.id);
-      if (md) await saveTextbookMarkdown(md);
-      await restoreSavedMaterial();
-      setTextbookSync('synced');
+      setTextbookSyncError(null);
+      const cloud = (await fetchCloudManifest(user.id)) ?? [];
+      const local = loadTextbookLibrary();
+      // 1) 本地有、云端没有 → 上传
+      for (const b of local) {
+        if (cloud.some(c => c.id === b.id)) continue;
+        const [pdf, md, preview] = await Promise.all([
+          loadTextbookPdf(b.id),
+          loadTextbookMarkdownFor(b.id),
+          loadTextbookPreviewFor(b.id),
+        ]);
+        await uploadBookToCloud(user, b.id, { pdf: pdf?.data, md: md ?? undefined, preview: preview ?? undefined });
+      }
+      // 2) 云端有、本地没有 → 加入教材库（先拉解析结果用于课程路径；PDF/MD 打开时懒下载）
+      const cloudOnly = cloud.filter(c => !local.some(b => b.id === c.id));
+      let changed = false;
+      for (const c of cloudOnly) {
+        const meta: TextbookMeta = { ...c };
+        let preview: MaterialPreview | null = null;
+        try {
+          const raw = await downloadCloudBookPreview(user.id, c.id);
+          if (raw && typeof raw === 'object' && Array.isArray((raw as MaterialPreview).units)) {
+            preview = raw as MaterialPreview;
+            await saveTextbookPreviewFor(c.id, preview);
+            meta.hasPreview = true;
+            meta.unitCount = preview.units.length;
+            meta.pages = preview.pages;
+          }
+        } catch (e) {
+          console.warn('下载云端教材解析结果失败：', e);
+        }
+        local.push(meta);
+        changed = true;
+        setRestoreNotice(`☁️ 已从云端恢复教材《${c.name}》。`);
+      }
+      if (changed) {
+        saveTextbookLibrary(local);
+        setTextbookLibrary(local);
+      }
+      setTextbookSync(cloudOnly.length === 0 && local.length === 0 ? 'off' : 'synced');
     } catch (e) {
-      console.warn('从云端恢复教材失败：', e);
+      console.warn('教材云同步失败：', e);
       setTextbookSync('error');
+      setTextbookSyncError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -312,7 +401,7 @@ function App() {
       setAuthUser(user);
       setAuthModalOpen(false);
       await applyCloudToLocal();
-      void restoreTextbookFromCloud(user);
+      void syncTextbooksFromCloud(user);
     } catch (e) {
       setAuthError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -326,6 +415,7 @@ function App() {
     setAuthUser(null);
     setSyncStatus('off');
     setTextbookSync('off');
+    setTextbookSyncError(null);
   };
 
   /** 已登录时，学习记录变化后防抖上传云端（统一走 useDebouncedCloudSync） */
@@ -334,10 +424,10 @@ function App() {
   useDebouncedCloudSync('french-flashcard-srs', flashcardSrs, !!authUser, setSyncStatus);
   useDebouncedCloudSync('french-analysis-history', analysisHistory, !!authUser, setSyncStatus);
   useDebouncedCloudSync('french-path-progress', pathProgress, !!authUser, setSyncStatus);
-  useDebouncedCloudSync('french-preview', materialPreview, !!authUser && !!materialPreview, setSyncStatus);
 
   useEffect(() => {
-    if (materialPreview) savePreview(materialPreview);
+    if (materialPreview && activeBookId) void saveTextbookPreviewFor(activeBookId, materialPreview);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [materialPreview]);
 
   useEffect(() => {
@@ -350,38 +440,133 @@ function App() {
     window.localStorage.setItem('deepseek-official-url', deepSeekOfficialUrl);
   }, [deepSeekApiUrl, deepSeekParseUrl, deepSeekAnalyzeUrl, deepSeekPracticeUrl, deepSeekApiKey, deepSeekModel, deepSeekOfficialUrl]);
 
-  /** 启动时恢复上次上传并保存的教材（IndexedDB 存 PDF + localStorage 存解析结果），无需重新上传 */
-  const restoreSavedMaterial = async () => {
-    try {
-      const saved = await loadPdfFile();
-      const preview = loadPreview();
-      if (!saved || !preview) return;
-      const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist/legacy/build/pdf');
-      GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-      const pdf = await getDocument({ data: saved.data }).promise;
-      setPdfName(saved.name);
-      setPdfDoc(pdf);
+  /** 打开某本教材：从 IndexedDB/云端加载 PDF、解析结果与 Markdown */
+  const openBook = async (id: string) => {
+    const book = loadTextbookLibrary().find(b => b.id === id);
+    if (!book) return;
+    setActiveBookId(id);
+    window.localStorage.setItem('french-active-book', id);
+    setError(null);
+
+    let pdf = await loadTextbookPdf(id);
+    if (!pdf && book.hasPdf && authUser) {
+      try {
+        const data = await downloadCloudBookFile(authUser.id, id, 'textbook.pdf');
+        if (data instanceof ArrayBuffer) {
+          await saveTextbookPdf(id, book.name, data);
+          pdf = { name: book.name, data };
+        }
+      } catch (e) {
+        console.warn('从云端下载教材 PDF 失败：', e);
+      }
+    }
+    const preview = await loadTextbookPreviewFor(id);
+    const md = await loadTextbookMarkdownFor(id);
+
+    setPdfName(pdf?.name ?? book.name);
+    setPdfDoc(null);
+    if (pdf) {
+      try {
+        const { getDocument, GlobalWorkerOptions } = await import('pdfjs-dist/legacy/build/pdf');
+        GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+        const doc = await getDocument({ data: pdf.data }).promise;
+        setPdfDoc(doc);
+        if (md == null) void generateTextbookMarkdown(doc, id);
+      } catch (e) {
+        console.warn('打开教材 PDF 失败：', e);
+      }
+    }
+    if (preview) {
       setMaterialPreview(preview);
-      // 后台预生成 Markdown 精读文本（有缓存则直接读取）
-      void generateTextbookMarkdown(pdf);
       setSelectedUnitIndex(0);
       setCandidateWords(extractWordCandidates(preview.units.map(u => u.sentences.join(' ')).join(' ')));
-      setRestoreNotice(`✅ 已自动恢复上次上传的教材《${saved.name}》，无需重新上传。`);
+    } else {
+      setMaterialPreview(null);
+      setCandidateWords([]);
+    }
+    if (md != null) {
+      setTextbookMarkdown(md);
+      setMdStatus('ready');
+      setMdSource(prev => prev ?? 'auto');
+    } else {
+      setTextbookMarkdown(null);
+      setMdStatus('idle');
+      setMdProgress(null);
+      setMdError(null);
+      setMdSource(null);
+    }
+    setReaderMode('pdf');
+  };
+
+  /** 启动时迁移旧版单教材 → 教材库，并恢复上次打开的教材 */
+  const restoreSavedMaterial = async () => {
+    try {
+      let lib = loadTextbookLibrary();
+      if (lib.length === 0) {
+        const legacyPdf = await loadPdfFile();
+        const legacyPreview = loadPreview();
+        const legacyMd = await loadTextbookMarkdown();
+        if (legacyPdf || legacyPreview) {
+          const id = 'legacy';
+          const meta: TextbookMeta = {
+            id,
+            name: legacyPdf?.name ?? legacyPreview?.title ?? '我的教材',
+            level: detectLevel(legacyPdf?.name ?? legacyPreview?.title ?? null),
+            pages: legacyPreview?.pages ?? 0,
+            sentenceCount: legacyPreview?.sentences.length ?? 0,
+            unitCount: legacyPreview?.units.length ?? 0,
+            source: 'pdf',
+            savedAt: new Date().toISOString(),
+            size: legacyPdf?.data.byteLength ?? 0,
+            hasPdf: Boolean(legacyPdf),
+            hasMd: Boolean(legacyMd),
+            hasPreview: Boolean(legacyPreview),
+          };
+          if (legacyPdf) await saveTextbookPdf(id, legacyPdf.name, legacyPdf.data);
+          if (legacyMd) await saveTextbookMarkdownFor(id, legacyMd);
+          if (legacyPreview) await saveTextbookPreviewFor(id, legacyPreview);
+          await clearPdfFile();
+          clearPreview();
+          lib = [meta];
+          saveTextbookLibrary(lib);
+          setTextbookLibrary(lib);
+        }
+      }
+      // 旧版进度 key（u:l）迁移为（bookId:u:l）
+      setPathProgress(prev => {
+        const next = { ...prev };
+        let changed = false;
+        for (const k of Object.keys(next)) {
+          if ((k.match(/:/g) || []).length === 1) {
+            const nk = `legacy:${k}`;
+            if (!(nk in next)) next[nk] = next[k];
+            delete next[k];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+      const last = window.localStorage.getItem('french-active-book');
+      const target = last && lib.some(b => b.id === last) ? last : (lib[lib.length - 1]?.id ?? null);
+      if (target) await openBook(target);
     } catch (e) {
       console.warn('恢复已保存教材失败：', e);
     }
   };
 
-  /** 把教材转成 Markdown 精读文本：优先读缓存，否则逐页本地转换 */
-  const generateTextbookMarkdown = async (pdf: PDFDocumentProxy | null = pdfDoc) => {
-    if (!pdf) return;
+  /** 把教材转成 Markdown 精读文本：优先读缓存，否则逐页本地转换（按教材 id 存取） */
+  const generateTextbookMarkdown = async (pdf: PDFDocumentProxy | null = null, bookId?: string) => {
+    const bid = bookId ?? activeBookId;
+    const doc = pdf ?? pdfDoc;
+    if (!doc || !bid) return;
     if (mdStatus === 'generating') return;
     try {
-      const cached = await loadTextbookMarkdown();
+      const cached = await loadTextbookMarkdownFor(bid);
       if (cached) {
         setTextbookMarkdown(cached);
         setMdStatus('ready');
         setMdSource(prev => prev ?? 'auto');
+        updateLibraryMeta(bid, { hasMd: true });
         return;
       }
     } catch (e) {
@@ -391,16 +576,20 @@ function App() {
     setMdProgress(null);
     setMdError(null);
     try {
-      const md = await pdfToMarkdown(pdf, (done, total) => setMdProgress({ done, total }));
+      const md = await pdfToMarkdown(doc, (done, total) => setMdProgress({ done, total }));
       setTextbookMarkdown(md);
       setMdStatus('ready');
       setMdSource('auto');
       try {
-        await saveTextbookMarkdown(md);
+        await saveTextbookMarkdownFor(bid, md);
+        updateLibraryMeta(bid, { hasMd: true });
       } catch (e) {
         console.warn('缓存 Markdown 失败：', e);
       }
-      if (authUser && md) void uploadMarkdownToCloud(authUser, md);
+      if (authUser && md) {
+        const book = loadTextbookLibrary().find(b => b.id === bid);
+        if (book) void uploadBookToCloud(authUser, bid, { md });
+      }
     } catch (e) {
       console.error('Markdown 生成失败：', e);
       setMdStatus('error');
@@ -410,20 +599,55 @@ function App() {
     }
   };
 
-  /** 导入外部 .md（如微软 MarkItDown 本地转换结果） */
-  const handleImportMarkdown = async (text: string, _name?: string) => {
+  /** 导入外部 .md（如微软 MarkItDown 本地转换结果）：始终新建一本教材，避免覆盖当前教材内容 */
+  const handleImportMarkdown = async (text: string, name?: string) => {
     const trimmed = (text || '').trim();
     if (!trimmed) return;
-    setTextbookMarkdown(trimmed);
-    setMdStatus('ready');
-    setMdSource('imported');
-    setMdError(null);
+    const bookName = name?.trim() ? name.replace(/\.(md|markdown|txt)$/i, '') : '导入的教材';
+    const bid = `tb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    const meta: TextbookMeta = {
+      id: bid,
+      name: bookName,
+      level: detectLevel(bookName),
+      pages: 0,
+      sentenceCount: 0,
+      unitCount: 0,
+      source: 'md',
+      savedAt: new Date().toISOString(),
+      size: trimmed.length,
+      hasPdf: false,
+      hasMd: true,
+      hasPreview: false,
+    };
     try {
-      await saveTextbookMarkdown(trimmed);
+      await saveTextbookMarkdownFor(bid, trimmed);
+      const preview = buildLocalMaterialPreview(trimmed, { title: bookName });
+      await saveTextbookPreviewFor(bid, preview);
+      meta.pages = preview.pages;
+      meta.sentenceCount = preview.sentences.length;
+      meta.unitCount = preview.units.length;
+      meta.hasPreview = true;
+      const lib = [...loadTextbookLibrary(), meta];
+      saveTextbookLibrary(lib);
+      setTextbookLibrary(lib);
+      setActiveBookId(bid);
+      window.localStorage.setItem('french-active-book', bid);
+      setPdfName(null);
+      setPdfDoc(null);
+      setTextbookMarkdown(trimmed);
+      setMdStatus('ready');
+      setMdSource('imported');
+      setMdError(null);
+      setMaterialPreview(preview);
+      setSelectedUnitIndex(0);
+      setCandidateWords(extractWordCandidates(preview.units.map(u => u.sentences.join(' ')).join(' ')));
+      setRestoreNotice(`✅ 已从 Markdown 导入教材《${bookName}》（教材库 ${lib.length} 本）。`);
+      if (authUser) void uploadBookToCloud(authUser, bid, { md: trimmed, preview });
     } catch (e) {
-      console.warn('缓存导入的 Markdown 失败：', e);
+      console.warn('导入 Markdown 失败：', e);
     }
   };
+
 
   /** 从 Markdown 精读跳回 PDF 原页对应页 */
   const handleJumpToPdfPage = (page: number) => {
@@ -436,9 +660,7 @@ function App() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    setPdfName(file.name);
     setError(null);
-    setMaterialPreview(null);
     setLoading(true);
 
     const isPdfFile = file.type.toLowerCase().includes('pdf') || file.name.toLowerCase().endsWith('.pdf');
@@ -473,25 +695,22 @@ function App() {
       // pdfjs 可能 detach 原始 buffer，先复制一份用于本地保存
       const pdfStorageCopy = arrayBuffer.slice(0);
       const { fullText, pages, pdfDoc } = await extractTextFromPdf(arrayBuffer);
-      const preview = buildMaterialPreview(fullText);
+      const bookId = `tb_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const preview = buildMaterialPreview(fullText, file.name);
       const units = await parsePdfUnits(fullText);
       const unitsWithPages = mapUnitsToPages(units, pages);
       const candidates = extractWordCandidates(fullText);
+      setPdfName(file.name);
       setPdfDoc(pdfDoc);
       setPdfPages(pages);
-      // 重置 Markdown 精读（换新教材后旧缓存/旧内容一律作废），并后台重新生成
+      // 重置 Markdown 精读（新教材旧缓存一律作废），并后台重新生成
       setTextbookMarkdown(null);
       setMdStatus('idle');
       setMdProgress(null);
       setMdError(null);
       setMdSource(null);
       setReaderMode('pdf');
-      try {
-        await clearTextbookMarkdown();
-      } catch (e) {
-        console.warn('清除旧 Markdown 缓存失败：', e);
-      }
-      void generateTextbookMarkdown(pdfDoc);
+      void generateTextbookMarkdown(pdfDoc, bookId);
       const fullPreview = { ...preview, units: unitsWithPages };
       setMaterialPreview(fullPreview);
       setSelectedUnitIndex(0);
@@ -499,12 +718,31 @@ function App() {
       setPdfJumpSignal(signal => signal + 1);
       setCandidateWords(candidates);
       try {
-        // 保存到本地：PDF 入 IndexedDB、解析结果入 localStorage，之后无需重新上传
-        await savePdfFile(file.name, pdfStorageCopy);
-        savePreview(fullPreview);
+        // 保存到本地：PDF 入 IndexedDB、解析结果入 IndexedDB、教材库元数据入 localStorage
+        await saveTextbookPdf(bookId, file.name, pdfStorageCopy);
+        await saveTextbookPreviewFor(bookId, fullPreview);
+        const meta: TextbookMeta = {
+          id: bookId,
+          name: file.name,
+          level: detectLevel(file.name),
+          pages: fullPreview.pages ?? pages.length,
+          sentenceCount: fullPreview.sentences.length,
+          unitCount: unitsWithPages.length,
+          source: 'pdf',
+          savedAt: new Date().toISOString(),
+          size: pdfStorageCopy.byteLength,
+          hasPdf: true,
+          hasMd: false,
+          hasPreview: true,
+        };
+        const lib = [...loadTextbookLibrary().filter(b => b.id !== bookId), meta];
+        saveTextbookLibrary(lib);
+        setTextbookLibrary(lib);
+        setActiveBookId(bookId);
+        window.localStorage.setItem('french-active-book', bookId);
         // 已登录时把教材同步到云端（跨设备恢复）
-        if (authUser) void uploadTextbookToCloud(authUser, pdfStorageCopy, file.name);
-        setRestoreNotice(`✅ 教材《${file.name}》已保存在本项目中，下次打开自动恢复，无需重新上传。`);
+        if (authUser) void uploadBookToCloud(authUser, bookId, { pdf: pdfStorageCopy, preview: fullPreview });
+        setRestoreNotice(`✅ 教材《${file.name}》已加入教材库（当前共 ${lib.length} 本），下次打开自动恢复。`);
       } catch (saveErr) {
         console.warn('保存教材到本地失败：', saveErr);
       }
@@ -596,6 +834,11 @@ function App() {
     let searchFrom = 0;
     let prevStartPage = 1;
     return units.map(unit => {
+      // 本地解析（TOC 目录定位）已给出正确起止页 → 直接保留，避免被句子匹配覆盖
+      if (unit.startPage && unit.startPage > 0) {
+        prevStartPage = unit.startPage;
+        return unit;
+      }
       // ① 精确匹配：只用句子（统一小写 + 弯引号归一，兼容 DeepSeek 改写）；命中目录/索引页时继续向后找正文页
       let startPage = -1;
       for (const sentence of unit.sentences.slice(0, 3)) {
@@ -645,113 +888,8 @@ function App() {
 
 
 
-  const buildMaterialPreview = (text: string): MaterialPreview => {
-    const normalized = text.replace(/\s+/g, ' ').trim();
-    const sentences = normalized
-      .split(/(?<=[。！？!?\.])/)
-      .map(item => item.trim())
-      .filter(Boolean);
-
-    const unitSplit = normalized.split(/(?=(?:第\s*\d+\s*单元|第\s*[一二三四五六七八九十]+\s*单元|单元\s*\d+|[Uu]nit[eé]\s*[IVXLCDM\d]+|Chapitre\s*\d+|章\s*\d+))/gi).map(item => item.trim()).filter(Boolean);
-
-    const units = unitSplit.length > 1 ? unitSplit.map(section => {
-      const titleMatch = section.match(/^(?:第\s*\d+\s*单元|第\s*[一二三四五六七八九十]+\s*单元|单元\s*\d+|[Uu]nit[eé]\s*[IVXLCDM\d]+|Chapitre\s*\d+|章\s*\d+)/i);
-      const title = titleMatch ? titleMatch[0] : '单元';
-      const body = titleMatch ? section.slice(titleMatch[0].length).trim() : section;
-      const sentencesInUnit = body
-        .split(/(?<=[。！？!?\.])/)
-        .map(item => item.trim())
-        .filter(Boolean);
-      const vocabulary = extractWordCandidates(body).slice(0, 6);
-      return {
-        title,
-        summary: sentencesInUnit.slice(0, 3).join(' '),
-        excerpt: sentencesInUnit.slice(0, 3).join(' '),
-        sentences: sentencesInUnit,
-        vocabulary,
-        practice: [
-          `请翻译本单元第一句：“${sentencesInUnit[0] ?? ''}”。`,
-          '请列出本单元中的 3 个核心词汇并说明用法。',
-          '请写一句与本单元主题相关的法语句子。',
-        ],
-      };
-    }) : [{
-      title: '整册教材',
-      summary: sentences.slice(0, 4).join(' '),
-      excerpt: sentences.slice(0, 4).join(' '),
-      sentences,
-      vocabulary: extractWordCandidates(text).slice(0, 6),
-      practice: [
-        '请概述本教材的核心主题。',
-        '请列出该单元中 3 个关键法语词汇并解释。',
-        '请根据教材内容写一句简短总结。',
-      ],
-    }];
-
-    return {
-      title: pdfName ?? '新教材',
-      pages: (normalized.match(/第 \d+ 页/g)?.length ?? 0) || 1,
-      excerpt: sentences.slice(0, 4).join(' '),
-      sentences,
-      units,
-    };
-  };
-
-  const extractWordCandidates = (text: string): WordCandidate[] => {
-    const normalized = text.toLowerCase().replace(/[^a-zàâçéèêëîïôûùüÿæœ\s]/gi, ' ');
-    const words = normalized.split(/\s+/).filter(Boolean);
-    const stopwords = new Set(['de', 'la', 'le', 'et', 'les', 'des', 'un', 'une', 'en', 'du', 'que', 'qui', 'pour', 'dans', 'est', 'pas', 'sur', 'se', 'il', 'elle', 'au', 'aux']);
-    const frequencyMap = words.reduce<Record<string, number>>((acc, word) => {
-      if (word.length <= 2 || stopwords.has(word)) return acc;
-      acc[word] = (acc[word] || 0) + 1;
-      return acc;
-    }, {});
-
-    return Object.entries(frequencyMap)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 12)
-      .map(([word, freq]) => ({
-        text: word,
-        frequency: freq,
-        cefr: getCeFrTag(word),
-        translation: translateWord(word),
-      }));
-  };
-
-  const getCeFrTag = (word: string): WordCandidate['cefr'] => {
-    if (word.length <= 4) return 'A2';
-    if (word.length <= 6) return 'B1';
-    if (word.length <= 8) return 'B2';
-    if (word.length <= 10) return 'C1';
-    return 'C2';
-  };
-
-  const translateWord = (word: string) => {
-    const dictionary: Record<string, string> = {
-      bonjour: '你好',
-      merci: '谢谢',
-      amour: '爱情',
-      "aujourd'hui": '今天',
-      toujours: '总是',
-      français: '法语',
-      écrire: '写',
-      parler: '说',
-      maison: '房子',
-      voyage: '旅行',
-      histoire: '历史',
-      important: '重要',
-      malheureusement: '不幸地',
-      cependant: '然而',
-    };
-    return dictionary[word] ?? '待补充';
-  };
-
-  const translateSentence = (sentence: string) => {
-    return sentence
-      .split(/\s+/)
-      .map(token => translateWord(token.replace(/[^a-zàâçéèêëîïôûùüÿæœ]/gi, '').toLowerCase()) || token)
-      .join(' ');
-  };
+  const buildMaterialPreview = (text: string, title?: string): MaterialPreview =>
+    buildLocalMaterialPreview(text, { title: title ?? pdfName ?? '新教材' });
 
   const generateDeepSeekStudyPlan = (units: UnitSection[]) => {
     if (units.length === 0) return [];
@@ -769,12 +907,28 @@ function App() {
     [materialPreview]
   );
 
-  const parsePdfUnits = async (text: string) => {
-    if (parseMode === 'local') {
-      setParseMethod('本地解析');
+  /**
+   * 单元解析。
+   * - local：稳健本地拆分（支持 Unité/Dossier/Leçon/Chapitre/第X单元，目录定位 + 页首兜底）。
+   * - auto：教材过长（>150k 字符）时直接用本地拆分，避免 DeepSeek 输入截断导致单元不全；
+   *         否则先试 DeepSeek，若返回单元数少于本地稳健拆分则视为截断，回退本地。
+   * - deepseek：强制 DeepSeek，失败或返回不完整时回退本地。
+   */
+  const parsePdfUnits = async (text: string): Promise<UnitSection[]> => {
+    const localUnits = buildLocalUnitsFromText(text).units;
+    const hasDeepSeek = Boolean(deepSeekApiKey || deepSeekParseUrl || deepSeekApiUrl);
+
+    if (parseMode === 'local' || !hasDeepSeek || (parseMode === 'auto' && text.length > 150000)) {
+      setParseMethod(
+        parseMode === 'deepseek'
+          ? '本地解析（未配置 DeepSeek）'
+          : text.length > 150000
+            ? '本地解析（教材较长，结构以本地为准；学习卡仍可用 DeepSeek 生成）'
+            : '本地解析'
+      );
       setDeepSeekParsePrompt(null);
       setDeepSeekParseResponse(null);
-      return buildLocalUnitsFromText(text);
+      return localUnits;
     }
 
     const prompt = buildParsePrompt(text);
@@ -818,6 +972,13 @@ function App() {
         throw new Error('DeepSeek Parse API 未返回单元数据');
       }
 
+      // DeepSeek 输入被截断时只会返回开头几个单元 → 少于本地稳健拆分则回退本地
+      if (units.length < localUnits.length) {
+        setParseMethod(`本地解析（DeepSeek 仅返回 ${units.length} 个单元，已回退为完整 ${localUnits.length} 个）`);
+        setDeepSeekParseResponse(JSON.stringify(data, null, 2));
+        return localUnits;
+      }
+
       setParseMethod('DeepSeek 解析');
       setDeepSeekParseResponse(JSON.stringify(data, null, 2));
       return units.map((unit: any) => ({
@@ -844,59 +1005,10 @@ function App() {
         if (prev) return `${header}\n\n--- 原始返回（前 4000 字符） ---\n${prev}`;
         return header;
       });
-      const localUnits = buildLocalUnitsFromText(text);
       return localUnits;
     }
   };
 
-  const buildLocalUnitsFromText = (text: string): UnitSection[] => {
-    const normalized = text.replace(/\s+/g, ' ').trim();
-    const unitSplit = normalized
-      .split(/(?=(?:第\s*\d+\s*单元|第\s*[一二三四五六七八九十]+\s*单元|单元\s*\d+|[Uu]nit[eé]\s*[IVXLCDM\d]+|Chapitre\s*\d+|章\s*\d+))/gi)
-      .map(item => item.trim())
-      .filter(Boolean);
-
-    if (unitSplit.length <= 1) {
-      const sentences = normalized
-        .split(/(?<=[。！？!?\.])/)
-        .map(item => item.trim())
-        .filter(Boolean);
-      return [{
-        title: '整册教材',
-        summary: sentences.slice(0, 3).join(' '),
-        excerpt: sentences.slice(0, 3).join(' '),
-        sentences,
-        vocabulary: extractWordCandidates(text).slice(0, 6),
-        practice: [
-          '请概述本教材的核心主题。',
-          '请列出该单元中 3 个关键法语词汇并解释。',
-          '请根据教材内容写一句简短总结。',
-        ],
-      }];
-    }
-
-    return unitSplit.map(section => {
-      const titleMatch = section.match(/^(?:第\s*\d+\s*单元|第\s*[一二三四五六七八九十]+\s*单元|单元\s*\d+|[Uu]nit[eé]\s*[IVXLCDM\d]+|Chapitre\s*\d+|章\s*\d+)/i);
-      const title = titleMatch ? titleMatch[0] : '单元';
-      const body = titleMatch ? section.slice(titleMatch[0].length).trim() : section;
-      const sentences = body
-        .split(/(?<=[。！？!?\.])/)
-        .map(item => item.trim())
-        .filter(Boolean);
-      return {
-        title,
-        summary: sentences.slice(0, 3).join(' '),
-        excerpt: sentences.slice(0, 3).join(' '),
-        sentences,
-        vocabulary: extractWordCandidates(body).slice(0, 6),
-        practice: [
-          `请翻译本单元第一句：“${sentences[0] ?? ''}”。`,
-          '请列出本单元中的 3 个核心词汇并说明用法。',
-          '请写一句与本单元主题相关的法语句子。',
-        ],
-      };
-    });
-  };
 
   const selectedUnit = useMemo(
     () => (materialPreview ? materialPreview.units[selectedUnitIndex] : null),
@@ -1027,14 +1139,16 @@ function App() {
   };
 
   /** 课程路径：课时「课文精读」→ 切到教材中心并跳转 PDF 到单元起始页 */
-  const handleOpenUnitFromPath = (index: number) => {
+  const handleOpenUnitFromPath = async (bookId: string, index: number) => {
+    if (bookId !== activeBookId) await openBook(bookId);
     setSelectedUnitIndex(index);
     setSelectedSentenceIndex(null);
     setAnalysisResult(null);
     setAnalysisPrompt(null);
     setPracticeExercises([]);
     setPracticePrompt(null);
-    const unit = materialPreview?.units[index];
+    const preview = bookId === activeBookId ? materialPreview : await loadTextbookPreviewFor(bookId);
+    const unit = preview?.units[index];
     if (unit?.startPage) {
       setPdfTargetPage(unit.startPage);
       setPdfJumpSignal(signal => signal + 1);
@@ -1050,8 +1164,9 @@ function App() {
 
   /** 课程路径：课时「核心词汇」→ 把单元词汇并入生词本（去重），返回新增数量 */
   /** 把单元学习卡「分类词汇」+ 提取核心词合并加入生词本（去重），返回新增数量 */
-  const handleAddUnitWordsFromPath = (unitIndex: number): number => {
-    const unit = materialPreview?.units[unitIndex];
+  /** 把单元学习卡「分类词汇」+ 提取核心词合并加入生词本（去重），返回新增数量 */
+  const addUnitWordsToPreview = (preview: MaterialPreview | null, unitIndex: number): number => {
+    const unit = preview?.units[unitIndex];
     if (!unit) return 0;
     const items: { text: string; translation: string; cefr: WordCandidate['cefr'] }[] = [];
     const seen = new Set<string>();
@@ -1119,25 +1234,27 @@ function App() {
   };
 
   /** 生成单个单元的「详细学习卡」（分类词汇/语法精华/常见错误/中法例句），结果合并进 materialPreview */
-  const generateUnitModule = async (unitIndex: number) => {
-    const unit = materialPreview?.units[unitIndex];
+  const generateUnitModule = async (bookId: string, unitIndex: number) => {
+    const preview = await loadTextbookPreviewFor(bookId);
+    const unit = preview?.units[unitIndex];
     if (!unit) return;
     if (unit.vocabGroups || unit.grammarTopics || unit.exampleSentences) return;
     setUnitModuleLoading(unitIndex);
     try {
       if (!deepSeekApiKey) {
         // 无 API Key：本地兜底，仅生成词汇分组
-        setMaterialPreview(prev => prev ? {
-          ...prev,
-          units: prev.units.map((u, i) => i === unitIndex ? ({
+        await updateBookPreview(bookId, p => ({
+          ...p,
+          units: p.units.map((u, i) => i === unitIndex ? ({
             ...u,
             vocabGroups: u.vocabulary.length ? [{ category: '本单元核心词汇', items: u.vocabulary.map(v => ({ word: v.text, translation: v.translation })) }] : [],
           }) : u),
-        } : prev);
+        }));
         return;
       }
-      const mdExcerpt = textbookMarkdown && unit.startPage
-        ? extractMarkdownRange(textbookMarkdown, unit.startPage, unit.endPage)
+      const mdForBook = await loadTextbookMarkdownFor(bookId);
+      const mdExcerpt = mdForBook && unit.startPage
+        ? extractMarkdownRange(mdForBook, unit.startPage, unit.endPage)
         : '';
       const content = await callDeepSeekChat(
         { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
@@ -1147,9 +1264,9 @@ function App() {
       );
       const data = extractJson(content);
       const norm = (arr: unknown) => (Array.isArray(arr) ? arr : []);
-      setMaterialPreview(prev => prev ? {
-        ...prev,
-        units: prev.units.map((u, i) => i === unitIndex ? ({
+      await updateBookPreview(bookId, p => ({
+        ...p,
+        units: p.units.map((u, i) => i === unitIndex ? ({
           ...u,
           vocabGroups: norm(data?.vocabGroups).map((g: any) => ({
             category: String(g?.category ?? ''),
@@ -1174,39 +1291,43 @@ function App() {
             fr: String(s?.fr ?? ''),
           })).filter((s: { zh: string; fr: string }) => s.zh && s.fr),
         }) : u),
-      } : prev);
+      }));
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setMaterialPreview(prev => prev ? {
-        ...prev,
-        units: prev.units.map((u, i) => i === unitIndex ? ({
+      await updateBookPreview(bookId, p => ({
+        ...p,
+        units: p.units.map((u, i) => i === unitIndex ? ({
           ...u,
           exampleSentences: [{ zh: '⚠️ 生成失败', fr: message }],
         }) : u),
-      } : prev);
+      }));
     } finally {
       setUnitModuleLoading(null);
     }
   };
 
+
   /** 生成单元「全题型练习」：DeepSeek 按考级题型生成，无 Key 时用本地模板兜底 */
-  const generateUnitPractice = async (unitIndex: number) => {
-    const unit = materialPreview?.units[unitIndex];
+  const generateUnitPractice = async (bookId: string, unitIndex: number) => {
+    const preview = await loadTextbookPreviewFor(bookId);
+    const unit = preview?.units[unitIndex];
     if (!unit || practiceLoading === unitIndex || unit.practiceSections) return;
     setPracticeLoading(unitIndex);
     try {
       let practice;
       if (deepSeekApiKey) {
-        const mdExcerpt = textbookMarkdown && unit.startPage
-          ? extractMarkdownRange(textbookMarkdown, unit.startPage, unit.endPage)
+        const mdForBook = await loadTextbookMarkdownFor(bookId);
+        const mdExcerpt = mdForBook && unit.startPage
+          ? extractMarkdownRange(mdForBook, unit.startPage, unit.endPage)
           : '';
+        const book = loadTextbookLibrary().find(b => b.id === bookId);
         const content = await callDeepSeekChat(
           { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
           '你是一位资深法语考级出题教师（DELF/DALF/TCF），负责为教材单元生成覆盖全部题型的单元练习，讲解用中文。',
           buildUnitPracticePrompt({
             unitTitle: unit.title,
             summary: unit.summary,
-            level: detectLevel(pdfName),
+            level: book?.level ?? detectLevel(pdfName),
             excerpt: mdExcerpt || unit.sentences.join(' '),
             vocab: unit.vocabulary.slice(0, 15).map(v => `${v.text}（${v.translation}）`),
             grammarTitles: (unit.grammarTopics ?? []).map(t => t.title),
@@ -1220,43 +1341,58 @@ function App() {
       } else {
         practice = buildLocalPractice(unit);
       }
-      setMaterialPreview(prev => prev ? {
-        ...prev,
-        units: prev.units.map((u, i) => i === unitIndex ? ({ ...u, practiceSections: practice }) : u),
-      } : prev);
+      await updateBookPreview(bookId, p => ({
+        ...p,
+        units: p.units.map((u, i) => i === unitIndex ? ({ ...u, practiceSections: practice }) : u),
+      }));
     } catch (e) {
       console.error('单元练习生成失败，使用本地模板：', e);
       const practice = buildLocalPractice(unit);
-      setMaterialPreview(prev => prev ? {
-        ...prev,
-        units: prev.units.map((u, i) => i === unitIndex ? ({ ...u, practiceSections: practice }) : u),
-      } : prev);
+      await updateBookPreview(bookId, p => ({
+        ...p,
+        units: p.units.map((u, i) => i === unitIndex ? ({ ...u, practiceSections: practice }) : u),
+      }));
     } finally {
       setPracticeLoading(null);
     }
   };
 
+
   /** 清除本地保存的教材（PDF + 解析结果），恢复为空状态 */
-  const handleClearSavedMaterial = async () => {
+  /** 删除某本教材（本地 IndexedDB + 教材库 + 云端） */
+  const handleDeleteBook = async (id: string) => {
     try {
-      await clearPdfFile();
-      clearPreview();
-      await clearTextbookMarkdown();
+      await deleteTextbookPdf(id);
+      await deleteTextbookMarkdownFor(id);
+      await deleteTextbookPreviewFor(id);
+      if (authUser) void deleteCloudBook(authUser.id, id);
+      const lib = loadTextbookLibrary().filter(b => b.id !== id);
+      saveTextbookLibrary(lib);
+      setTextbookLibrary(lib);
+      if (activeBookId === id) {
+        if (lib.length > 0) {
+          await openBook(lib[lib.length - 1].id);
+        } else {
+          setActiveBookId(null);
+          window.localStorage.removeItem('french-active-book');
+          setPdfName(null);
+          setPdfDoc(null);
+          setMaterialPreview(null);
+          setCandidateWords([]);
+          setRestoreNotice(null);
+          setTextbookMarkdown(null);
+          setMdStatus('idle');
+          setMdProgress(null);
+          setMdError(null);
+          setMdSource(null);
+          setReaderMode('pdf');
+        }
+      }
     } catch (e) {
-      console.warn('清除本地教材失败：', e);
+      console.warn('删除教材失败：', e);
     }
-    setPdfName(null);
-    setPdfDoc(null);
-    setMaterialPreview(null);
-    setCandidateWords([]);
-    setRestoreNotice(null);
-    setTextbookMarkdown(null);
-    setMdStatus('idle');
-    setMdProgress(null);
-    setMdError(null);
-    setMdSource(null);
-    setReaderMode('pdf');
   };
+
 
   const deepSeekModeLabel = useMemo(() => {
     const hasCustom =
@@ -1895,11 +2031,12 @@ function App() {
 
 {activeTab === 'path' && (
     <PathTab
-      materialPreview={materialPreview}
-      pdfName={pdfName}
+      textbookLibrary={textbookLibrary}
+      activeBookId={activeBookId}
+      onOpenBook={openBook}
       hasApiKey={!!deepSeekApiKey}
       onOpenUnitInPdf={handleOpenUnitFromPath}
-      onAddUnitWords={handleAddUnitWordsFromPath}
+      onAddUnitWords={addUnitWordsToPreview}
       wordBook={wordBook}
       onAddWordbookItem={handleAddWordbookItem}
       onGoMaterials={() => setActiveTab('materials')}
@@ -1910,10 +2047,10 @@ function App() {
       onGeneratePractice={generateUnitPractice}
       practiceLoading={practiceLoading}
       progress={pathProgress}
-      onToggleProgress={(unit, lesson) => {
+      onToggleProgress={(bookId, unit, lesson) => {
         setPathProgress(prev => {
           const next = { ...prev };
-          const key = `${unit}:${lesson}`;
+          const key = `${bookId}:${unit}:${lesson}`;
           if (next[key]) delete next[key];
           else next[key] = true;
           return next;
@@ -1943,6 +2080,12 @@ function App() {
 {activeTab === 'materials' && (
     <MaterialsTab
       pdfName={ pdfName }
+      textbookLibrary={ textbookLibrary }
+      activeBookId={ activeBookId }
+      onOpenBook={ openBook }
+      onDeleteBook={ handleDeleteBook }
+      textbookSyncError={ textbookSyncError }
+      onRetryCloudSync={ () => { if (authUser) void syncTextbooksFromCloud(authUser); } }
       error={ error }
       loading={ loading }
       parseMethod={ parseMethod }
@@ -1994,11 +2137,11 @@ function App() {
       handleSentenceSelect={ handleSentenceSelect }
       handleAddToWordBook={ handleAddToWordBook }
       handleAnalyzeSentence={ handleAnalyzeSentence }
-      onGenerateUnitModule={ generateUnitModule }
+      onGenerateUnitModule={ (unitIndex: number) => (activeBookId ? generateUnitModule(activeBookId, unitIndex) : Promise.resolve()) }
       unitModuleLoading={ unitModuleLoading }
       restoreNotice={ restoreNotice }
       onDismissRestoreNotice={ () => setRestoreNotice(null) }
-      onClearSavedMaterial={ handleClearSavedMaterial }
+
       readerMode={ readerMode }
       setReaderMode={ setReaderMode }
       textbookMarkdown={ textbookMarkdown }

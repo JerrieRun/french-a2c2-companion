@@ -192,3 +192,22 @@ export type FlashcardSrs = {
   /** 下次复习时间戳（ms）；0 表示从未学过 */
   due: number;
 };
+
+/** 教材库条目（轻量元数据；PDF/Markdown/解析结果按 id 存在 IndexedDB） */
+export type TextbookMeta = {
+  id: string;
+  /** 原始文件名（PDF 或 Markdown） */
+  name: string;
+  /** 检测到的 CEFR 等级（A2/B1/B2/C1/C2，未知为 B2 兜底） */
+  level: string;
+  pages: number;
+  sentenceCount: number;
+  unitCount: number;
+  source: 'pdf' | 'md';
+  savedAt: string;
+  /** PDF 字节数（Markdown 时为字符数） */
+  size: number;
+  hasPdf: boolean;
+  hasMd: boolean;
+  hasPreview: boolean;
+};

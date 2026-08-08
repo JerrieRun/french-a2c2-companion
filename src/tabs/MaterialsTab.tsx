@@ -6,13 +6,19 @@ import { MarkdownReader } from '../components/MarkdownReader';
 import { ResultFloatingPanel } from '../components/ResultFloatingPanel';
 import { UnitSummaryCard } from '../components/UnitSummaryCard';
 import { UnitStudyModule } from '../components/UnitStudyModule';
-import type { AnalysisResult, IntensiveAnalysis, MaterialPreview, UnitSection, WordCandidate, WordLookupResult } from '../types';
+import type { AnalysisResult, IntensiveAnalysis, MaterialPreview, TextbookMeta, UnitSection, WordCandidate, WordLookupResult } from '../types';
 
 type ParseMode = 'auto' | 'deepseek' | 'local';
 
 type MaterialsTabProps = {
   // 教材与解析状态
   pdfName: string | null;
+  textbookLibrary: TextbookMeta[];
+  activeBookId: string | null;
+  onOpenBook: (id: string) => Promise<void>;
+  onDeleteBook: (id: string) => Promise<void>;
+  textbookSyncError: string | null;
+  onRetryCloudSync: () => void;
   error: string | null;
   loading: boolean;
   parseMethod: string;
@@ -75,7 +81,6 @@ type MaterialsTabProps = {
   unitModuleLoading: number | null;
   restoreNotice: string | null;
   onDismissRestoreNotice: () => void;
-  onClearSavedMaterial: () => Promise<void>;
   // Markdown 精读
   readerMode: 'pdf' | 'md';
   setReaderMode: (mode: 'pdf' | 'md') => void;
@@ -110,7 +115,8 @@ type MaterialsTabProps = {
 
 export function MaterialsTab(props: MaterialsTabProps) {
   const {
-    pdfName, error, loading, parseMethod, parseMode, setParseMode,
+    pdfName, textbookLibrary, activeBookId, onOpenBook, onDeleteBook, textbookSyncError, onRetryCloudSync,
+    error, loading, parseMethod, parseMode, setParseMode,
     materialPreview, selectedUnit, selectedUnitIndex,
     sentenceCount, selectedSentence,
     wordBook, deepSeekStudyPlan, deepSeekModeLabel,
@@ -125,7 +131,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     handleAnalyzeSentence, handleGeneratePractice, testDeepSeekConnection, translateSentence,
     pdfDoc, pdfTargetPage, pdfJumpSignal,
     onIntensiveAnalyze, onAddWord,
-    onGenerateUnitModule, unitModuleLoading, restoreNotice, onDismissRestoreNotice, onClearSavedMaterial,
+    onGenerateUnitModule, unitModuleLoading, restoreNotice, onDismissRestoreNotice,
     readerMode, setReaderMode, textbookMarkdown, mdStatus, mdProgress, mdError, mdSource,
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
     intensiveResult, intensiveLoading, onCloseIntensive,
@@ -169,6 +175,56 @@ export function MaterialsTab(props: MaterialsTabProps) {
     </div>
   </div>
 
+  <div className="rounded-[28px] border border-slate-200 bg-white/90 p-5 shadow-sm">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="text-lg font-semibold text-slate-900">📚 教材库（{textbookLibrary.length} 本）</h3>
+      <p className="text-xs text-slate-500">上传的 A2 / B1 / B2… 教材都会保留在这里，精读与课程路径可随时切换。</p>
+    </div>
+    {textbookLibrary.length === 0 ? (
+      <p className="mt-3 text-sm text-slate-500">还没有教材，上传第一本 PDF 后自动加入教材库。</p>
+    ) : (
+      <div className="mt-3 space-y-2">
+        {textbookLibrary.map(book => (
+          <div
+            key={book.id}
+            className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border p-3 ${
+              book.id === activeBookId ? 'border-coral bg-coral/5' : 'border-slate-200 bg-white'
+            }`}
+          >
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="rounded-xl bg-lavender/60 px-2 py-0.5 text-xs font-bold text-slate-700">{book.level}</span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-slate-800">{book.name}</p>
+                <p className="text-xs text-slate-500">
+                  {book.unitCount} 单元 · {book.pages || '-'} 页{book.hasMd ? ' · 📝 已精读' : ''}
+                  {book.id === activeBookId ? ' · 📖 当前' : ''}
+                </p>
+              </div>
+            </div>
+            <div className="flex shrink-0 gap-2">
+              {book.id !== activeBookId && (
+                <button
+                  type="button"
+                  onClick={() => void onOpenBook(book.id)}
+                  className="rounded-xl bg-coral px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+                >
+                  打开
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => { if (window.confirm(`确定删除教材《${book.name}》？本地与云端记录都会移除。`)) void onDeleteBook(book.id); }}
+                className="rounded-xl bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 hover:bg-rose-50 hover:text-rose-600"
+              >
+                删除
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+
   {pdfDoc && (
     <div className="space-y-4">
       <div className="rounded-[28px] border border-slate-200 bg-white/90 p-4 shadow-sm">
@@ -177,6 +233,19 @@ export function MaterialsTab(props: MaterialsTabProps) {
             <h3 className="text-lg font-semibold text-slate-900">📖 教材精读</h3>
             <p className="mt-1 text-xs text-slate-500">在原文上划线选中句子 / 段落 / 单词，即可翻译、解析句型、单词详解或加入生词本。</p>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+          {textbookLibrary.length > 1 && (
+            <select
+              value={activeBookId ?? ''}
+              onChange={e => { if (e.target.value) void onOpenBook(e.target.value); }}
+              title="切换教材"
+              className="rounded-2xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 outline-none focus:border-sky"
+            >
+              {textbookLibrary.map(b => (
+                <option key={b.id} value={b.id}>{b.name}（{b.level}）</option>
+              ))}
+            </select>
+          )}
           <div className="flex items-center gap-1.5 rounded-2xl bg-slate-100 p-1">
             <button
               type="button"
@@ -195,6 +264,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
             >
               📝 Markdown 精读
             </button>
+          </div>
           </div>
         </div>
       </div>
@@ -445,23 +515,40 @@ export function MaterialsTab(props: MaterialsTabProps) {
       </div>
       {pdfName && <div className="mt-4 rounded-3xl bg-lavender/20 p-4 text-sm text-slate-700">已选择：<strong>{pdfName}</strong></div>}
       {textbookSync !== 'off' && (
-        <div className={`mt-2 flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold ${
+        <div className={`mt-2 flex flex-wrap items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold ${
           textbookSync === 'synced' ? 'bg-emerald-50 text-emerald-700'
             : textbookSync === 'syncing' ? 'bg-sky/10 text-slate-600'
             : 'bg-rose-50 text-rose-600'
         }`}>
           {textbookSync === 'synced' && '☁️ 教材已同步到云端（可跨设备恢复）'}
           {textbookSync === 'syncing' && '☁️ 教材同步中 / 从云端恢复中…'}
-          {textbookSync === 'error' && '⚠️ 教材云端同步失败（可在 Supabase 后台确认 Storage 设置）'}
+          {textbookSync === 'error' && (
+            <>
+              <span>⚠️ 教材云端同步失败：{textbookSyncError ?? '请稍后重试'}</span>
+              <button
+                type="button"
+                onClick={onRetryCloudSync}
+                className="rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+              >
+                🔄 重新同步
+              </button>
+            </>
+          )}
         </div>
       )}
       {restoreNotice && (
         <div className="mt-4 flex items-start justify-between gap-3 rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <span>{restoreNotice}</span>
           <div className="flex shrink-0 gap-2">
-            <button type="button" onClick={() => void onClearSavedMaterial()} className="rounded-xl bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-slate-100">
-              清除已保存教材
-            </button>
+            {activeBookId && (
+              <button
+                type="button"
+                onClick={() => { if (window.confirm('确定删除当前教材吗？')) void onDeleteBook(activeBookId); }}
+                className="rounded-xl bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm hover:bg-rose-50 hover:text-rose-600"
+              >
+                删除当前教材
+              </button>
+            )}
             <button type="button" onClick={onDismissRestoreNotice} className="rounded-xl bg-white px-2.5 py-1.5 text-xs text-slate-400 shadow-sm hover:bg-slate-100">✕</button>
           </div>
         </div>
