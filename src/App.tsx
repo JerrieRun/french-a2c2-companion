@@ -174,6 +174,8 @@ function App() {
   // 多教材：教材库元数据 + 当前活动教材 + 云端同步真实错误
   const [textbookLibrary, setTextbookLibrary] = useLocalStorageState<TextbookMeta[]>('french-textbook-library', []);
   const [activeBookId, setActiveBookId] = useState<string | null>(null);
+  // 正在打开/下载教材（用于加载提示）
+  const [openingBookId, setOpeningBookId] = useState<string | null>(null);
   const [textbookSyncError, setTextbookSyncError] = useState<string | null>(null);
   // 大文件自动压缩
   const [compressing, setCompressing] = useState(false);
@@ -442,22 +444,38 @@ function App() {
     setActiveBookId(id);
     window.localStorage.setItem('french-active-book', id);
     setError(null);
+    setOpeningBookId(id);
 
+    // 本地没有的内容，登录状态下无条件尝试从云端下载（404 会返回 null，标志位不准也没关系）
     let pdf = await loadTextbookPdf(id);
-    if (!pdf && book.hasPdf && authUser) {
-      try {
-        const data = await downloadCloudBookFile(authUser.id, id, 'textbook.pdf');
-        if (data instanceof ArrayBuffer) {
-          await saveTextbookPdf(id, book.name, data);
-          pdf = { name: book.name, data };
+    let md = await loadTextbookMarkdownFor(id);
+    if (authUser) {
+      if (!pdf) {
+        try {
+          const data = await downloadCloudBookFile(authUser.id, id, 'textbook.pdf');
+          if (data instanceof ArrayBuffer) {
+            await saveTextbookPdf(id, book.name, data);
+            pdf = { name: book.name, data };
+          }
+        } catch (e) {
+          console.warn('从云端下载教材 PDF 失败：', e);
         }
-      } catch (e) {
-        console.warn('从云端下载教材 PDF 失败：', e);
+      }
+      if (!md) {
+        try {
+          const raw = await downloadCloudBookFile(authUser.id, id, 'textbook.md');
+          if (typeof raw === 'string') {
+            await saveTextbookMarkdownFor(id, raw);
+            md = raw;
+          }
+        } catch (e) {
+          console.warn('从云端下载教材 Markdown 失败：', e);
+        }
       }
     }
+
     let preview = await loadTextbookPreviewFor(id);
-    // 自愈：历史上「上传新教材时预览写入旧教材槽位」的竞态可能让预览与本书不匹配。
-    // 若预览文件名与本书不一致，或本书有 PDF 却没有预览，则用本书 PDF 重建解析结果。
+    // 自愈：历史竞态可能把别的教材预览写进本书槽位；或解析器已升级 → 用本书 PDF 重建
     if (
       preview &&
       ((book.name && preview.title && preview.title !== book.name) || (book.parseVersion ?? 0) < LOCAL_PARSE_VERSION)
@@ -485,7 +503,6 @@ function App() {
         console.warn('重建教材解析结果失败：', e);
       }
     }
-    const md = await loadTextbookMarkdownFor(id);
 
     setPdfName(pdf?.name ?? book.name);
     setPdfDoc(null);
@@ -520,7 +537,14 @@ function App() {
       setMdSource(null);
     }
     setReaderMode('pdf');
+
+    // 既无 PDF 也无 Markdown → 明确提示，避免“点了没反应”
+    if (!pdf && !md && !preview) {
+      setError('这本书的云端记录不完整（PDF / Markdown 都还没同步到云端），暂时无法打开精读。请回到上传它的设备，确认同步成功后重试。');
+    }
+    setOpeningBookId(null);
   };
+
 
   /** 启动时迁移旧版单教材 → 教材库，并恢复上次打开的教材 */
   const restoreSavedMaterial = async () => {
@@ -2109,6 +2133,7 @@ function App() {
       textbookLibrary={ textbookLibrary }
       activeBookId={ activeBookId }
       onOpenBook={ openBook }
+      openingBookId={ openingBookId }
       onDeleteBook={ handleDeleteBook }
       textbookSyncError={ textbookSyncError }
       onRetryCloudSync={ () => { if (authUser) void syncTextbooksFromCloud(authUser); } }

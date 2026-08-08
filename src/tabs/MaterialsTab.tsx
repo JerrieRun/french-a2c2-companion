@@ -16,6 +16,7 @@ type MaterialsTabProps = {
   textbookLibrary: TextbookMeta[];
   activeBookId: string | null;
   onOpenBook: (id: string) => Promise<void>;
+  openingBookId: string | null;
   onDeleteBook: (id: string) => Promise<void>;
   textbookSyncError: string | null;
   onRetryCloudSync: () => void;
@@ -115,7 +116,7 @@ type MaterialsTabProps = {
 
 export function MaterialsTab(props: MaterialsTabProps) {
   const {
-    pdfName, textbookLibrary, activeBookId, onOpenBook, onDeleteBook, textbookSyncError, onRetryCloudSync,
+    pdfName, textbookLibrary, activeBookId, onOpenBook, openingBookId, onDeleteBook, textbookSyncError, onRetryCloudSync,
     error, loading, parseMethod, parseMode, setParseMode,
     materialPreview, selectedUnit, selectedUnitIndex,
     sentenceCount, selectedSentence,
@@ -196,13 +197,17 @@ export function MaterialsTab(props: MaterialsTabProps) {
               <div className="min-w-0">
                 <p className="truncate text-sm font-semibold text-slate-800">{book.name}</p>
                 <p className="text-xs text-slate-500">
-                  {book.unitCount} 单元 · {book.pages || '-'} 页{book.hasMd ? ' · 📝 已精读' : ''}
+                  {book.unitCount} 单元 · {book.pages || '-'} 页
+                  {book.hasMd ? ' · 📝 已精读' : ''}
+                  {book.hasPdf ? '' : ' · ⚠️ PDF 未上传云端'}
                   {book.id === activeBookId ? ' · 📖 当前' : ''}
                 </p>
               </div>
             </div>
             <div className="flex shrink-0 gap-2">
-              {book.id !== activeBookId && (
+              {book.id === openingBookId ? (
+                <span className="rounded-xl bg-sky/15 px-3 py-1.5 text-xs font-semibold text-slate-600">⏳ 正在打开…</span>
+              ) : book.id !== activeBookId ? (
                 <button
                   type="button"
                   onClick={() => void onOpenBook(book.id)}
@@ -210,7 +215,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
                 >
                   打开
                 </button>
-              )}
+              ) : null}
               <button
                 type="button"
                 onClick={() => { if (window.confirm(`确定删除教材《${book.name}》？本地与云端记录都会移除。`)) void onDeleteBook(book.id); }}
@@ -224,6 +229,12 @@ export function MaterialsTab(props: MaterialsTabProps) {
       </div>
     )}
   </div>
+
+  {activeBookId && !pdfDoc && !textbookMarkdown && openingBookId !== activeBookId && (
+    <div className="rounded-[28px] border border-dashed border-slate-300 bg-white/70 p-6 text-center text-sm text-slate-600 shadow-sm">
+      这本书暂时没有可读的 PDF / Markdown（可能尚未同步到云端），只能看到下方「教材单元」的结构。
+    </div>
+  )}
 
   {pdfDoc && (
     <div className="space-y-4">
