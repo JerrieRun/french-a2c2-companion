@@ -52,6 +52,12 @@ export type UnitSection = {
   commonMistakes?: MistakePair[];
   /** 中法对照实用例句（DeepSeek 生成的学习卡） */
   exampleSentences?: BilingualSentence[];
+  /** 重点长难句（学习卡）：法语原句 + 中文翻译 + 结构/考点解析 */
+  keySentences?: Array<{ fr: string; zh: string; analysis: string }>;
+  /** 写作积累句（学习卡）：可直接用在作文里的高级表达 */
+  writingSentences?: Array<{ fr: string; zh: string; usage: string }>;
+  /** 详细学习卡版本：升级生成逻辑后旧的卡片会自动重新生成补齐 */
+  cardVersion?: number;
   /** 单元对应的 PDF 起始页（1 基） */
   startPage?: number;
   /** 单元对应的 PDF 结束页（1 基） */

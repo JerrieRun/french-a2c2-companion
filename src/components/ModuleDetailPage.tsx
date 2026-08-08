@@ -93,12 +93,14 @@ export function ModuleDetailPage(props: ModuleDetailPageProps) {
     unit.vocabGroups?.length ||
     unit.grammarTopics?.length ||
     unit.commonMistakes?.length ||
-    unit.exampleSentences?.length
+    unit.exampleSentences?.length ||
+    unit.keySentences?.length ||
+    unit.writingSentences?.length
   );
 
-  // 需要学习卡的模块：进入页面时若尚未生成则自动生成
+  // 需要学习卡的模块：进入页面时若尚未生成（或旧版卡片缺长难句/写作句）则自动重新生成
   useEffect(() => {
-    if (lesson?.needsCard && !cardReady && unitModuleLoading !== unitIndex) {
+    if (lesson?.needsCard && (!cardReady || (unit.cardVersion ?? 0) < 2) && unitModuleLoading !== unitIndex) {
       void onGenerateUnitModule(unitIndex);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -164,29 +166,75 @@ export function ModuleDetailPage(props: ModuleDetailPageProps) {
       }
 
       case 'pattern': {
+        const keySentences = unit.keySentences ?? [];
+        const writingSentences = unit.writingSentences ?? [];
         const candidates = (unit.exampleSentences?.map(s => s.fr) ?? []).slice(0, 4);
-        const sentences = candidates.length ? candidates : (unit.sentences?.slice(0, 4) ?? []);
+        const coreSentences = candidates.length ? candidates : (unit.sentences?.slice(0, 4) ?? []);
+        const analyzeIdx = (i: number, sentence: string) => (
+          <>
+            <button
+              type="button"
+              disabled={analyzing === i}
+              onClick={() => void runAnalysis(i, sentence)}
+              className="mt-2 rounded-xl bg-lavender/40 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-lavender/70 disabled:opacity-50"
+            >
+              {analyzing === i ? '⏳ 分析中…' : '🧩 分析此句'}
+            </button>
+            {analysisResults[i] && <AnalysisView result={analysisResults[i]} />}
+          </>
+        );
         return (
-          <div className="space-y-4">
-            <p className="text-sm text-slate-500">选取本单元核心句子，用 DeepSeek 拆解语法结构、归纳句型并指出易错点。</p>
-            {sentences.length === 0 ? (
-              <EmptyCard message="本单元暂无可分析的句子。" hasApiKey={hasApiKey} />
-            ) : (
-              sentences.map((s, i) => (
-                <div key={i} className="rounded-2xl border border-slate-200 bg-white p-4">
-                  <p className="text-base leading-7 text-slate-800">{s}</p>
-                  <button
-                    type="button"
-                    disabled={analyzing === i}
-                    onClick={() => void runAnalysis(i, s)}
-                    className="mt-2 rounded-xl bg-lavender/40 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-lavender/70 disabled:opacity-50"
-                  >
-                    {analyzing === i ? '⏳ 分析中…' : '🧩 分析此句'}
-                  </button>
-                  {analysisResults[i] && <AnalysisView result={analysisResults[i]} />}
+          <div className="space-y-5">
+            <p className="text-sm text-slate-500">本单元句型精析：先看「重点长难句」与「写作积累句」，可逐句用 DeepSeek 拆解结构；下方可再分析任意核心句子。</p>
+
+            {keySentences.length > 0 && (
+              <section>
+                <h4 className="flex items-center gap-2 text-base font-semibold text-slate-900">🧗 重点长难句</h4>
+                <div className="mt-3 space-y-3">
+                  {keySentences.map((k, i) => (
+                    <div key={`k-${i}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <p className="text-base font-medium leading-7 text-slate-900">{k.fr}</p>
+                      <p className="mt-1 text-sm text-slate-500">{k.zh}</p>
+                      {k.analysis && (
+                        <p className="mt-2 rounded-2xl bg-cream p-2.5 text-xs leading-6 text-slate-600">🧩 {k.analysis}</p>
+                      )}
+                      {analyzeIdx(1000 + i, k.fr)}
+                    </div>
+                  ))}
                 </div>
-              ))
+              </section>
             )}
+
+            {writingSentences.length > 0 && (
+              <section>
+                <h4 className="flex items-center gap-2 text-base font-semibold text-slate-900">✍️ 写作积累句</h4>
+                <div className="mt-3 space-y-2">
+                  {writingSentences.map((w, i) => (
+                    <div key={`w-${i}`} className="rounded-2xl border border-slate-200 bg-white p-3 text-sm">
+                      <p className="font-medium leading-7 text-slate-900">{w.fr}</p>
+                      <p className="mt-0.5 text-slate-500">{w.zh}</p>
+                      {w.usage && <p className="mt-1.5 text-xs text-coral">💡 {w.usage}</p>}
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            <section>
+              <h4 className="flex items-center gap-2 text-base font-semibold text-slate-900">🔍 核心句子分析</h4>
+              <div className="mt-3 space-y-3">
+                {coreSentences.length === 0 ? (
+                  <EmptyCard message="本单元暂无可分析的句子。" hasApiKey={hasApiKey} />
+                ) : (
+                  coreSentences.map((s, i) => (
+                    <div key={`c-${i}`} className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <p className="text-base leading-7 text-slate-800">{s}</p>
+                      {analyzeIdx(2000 + i, s)}
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
           </div>
         );
       }

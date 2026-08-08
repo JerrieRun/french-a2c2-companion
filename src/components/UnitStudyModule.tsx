@@ -12,8 +12,12 @@ export function UnitStudyModule({ unit, loading, onGenerate }: UnitStudyModulePr
     unit.vocabGroups?.length ||
     unit.grammarTopics?.length ||
     unit.commonMistakes?.length ||
-    unit.exampleSentences?.length
+    unit.exampleSentences?.length ||
+    unit.keySentences?.length ||
+    unit.writingSentences?.length
   );
+  // 旧版学习卡（未含长难句/写作句）需要重新生成补齐
+  const needsRegenerate = hasContent && (unit.cardVersion ?? 0) < 2;
 
   if (!hasContent) {
     return (
@@ -21,7 +25,7 @@ export function UnitStudyModule({ unit, loading, onGenerate }: UnitStudyModulePr
         <div className="text-3xl">✨</div>
         <h5 className="mt-2 text-base font-semibold text-slate-800">本单元详细学习卡</h5>
         <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
-          用 DeepSeek 按「分类词汇 + 语法精华 + 常见错误 + 中法例句」模式生成，比基础解析更详细。
+          用 DeepSeek 按「分类词汇 + 语法精华（覆盖教材 Grammaire）+ 常见错误 + 中法例句 + 重点长难句 + 写作积累句」生成，比基础解析更详细。
         </p>
         {onGenerate && (
           <button
@@ -40,6 +44,20 @@ export function UnitStudyModule({ unit, loading, onGenerate }: UnitStudyModulePr
 
   return (
     <div className="space-y-5">
+      {needsRegenerate && onGenerate && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-sky/40 bg-sky/10 p-3 text-sm">
+          <p className="text-slate-700">这份学习卡是旧版本，缺少「重点长难句 / 写作积累句」，语法精华也可能不完整。</p>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={onGenerate}
+            className="rounded-2xl bg-sky px-4 py-2 text-xs font-semibold text-slate-900 hover:opacity-90 disabled:opacity-40"
+          >
+            {loading ? 'DeepSeek 生成中…' : '🔄 重新生成补齐'}
+          </button>
+        </div>
+      )}
+
       {/* ① 分类核心词汇 */}
       {!!unit.vocabGroups?.length && (
         <section>
@@ -128,6 +146,42 @@ export function UnitStudyModule({ unit, loading, onGenerate }: UnitStudyModulePr
               <div key={si} className="rounded-3xl border border-slate-200 bg-white p-3 text-sm">
                 <p className="text-slate-500">{s.zh}</p>
                 <p className="mt-0.5 font-medium text-slate-900">{s.fr}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ⑤ 重点长难句 */}
+      {!!unit.keySentences?.length && (
+        <section>
+          <h5 className="flex items-center gap-2 text-base font-semibold text-slate-900">🧗 重点长难句</h5>
+          <p className="mt-1 text-xs text-slate-500">结构复杂、值得拆解学习的句子，翻译与考点见每条解析。</p>
+          <div className="mt-3 space-y-3">
+            {unit.keySentences.map((k, ki) => (
+              <div key={ki} className="rounded-3xl border border-slate-200 bg-white p-4 text-sm">
+                <p className="font-medium leading-7 text-slate-900">{k.fr}</p>
+                <p className="mt-1 text-slate-500">{k.zh}</p>
+                {k.analysis && (
+                  <p className="mt-2 rounded-2xl bg-cream p-2.5 text-xs leading-6 text-slate-600">🧩 {k.analysis}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ⑥ 写作积累句 */}
+      {!!unit.writingSentences?.length && (
+        <section>
+          <h5 className="flex items-center gap-2 text-base font-semibold text-slate-900">✍️ 写作积累句</h5>
+          <p className="mt-1 text-xs text-slate-500">可直接用在作文里的高级表达，积累后写作更地道。</p>
+          <div className="mt-3 space-y-2">
+            {unit.writingSentences.map((w, wi) => (
+              <div key={wi} className="rounded-3xl border border-slate-200 bg-white p-3 text-sm">
+                <p className="font-medium leading-7 text-slate-900">{w.fr}</p>
+                <p className="mt-0.5 text-slate-500">{w.zh}</p>
+                {w.usage && <p className="mt-1.5 text-xs text-coral">💡 {w.usage}</p>}
               </div>
             ))}
           </div>

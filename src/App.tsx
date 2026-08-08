@@ -15,6 +15,7 @@ import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import { compressPdf } from './lib/pdfCompress';
 import { buildLocalMaterialPreview, buildLocalUnitsFromText, LOCAL_PARSE_VERSION } from './lib/units';
 import { extractWordCandidates, getCeFrTag, translateSentence, translateWord } from './lib/words';
+import { extractGrammarSection, pickKeySentences, pickWritingSentences } from './lib/studyCard';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
 import type { AnalysisRecord, AnalysisResult, FlashcardSrs, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, TextbookMeta, UnitSection, WordCandidate, WordLookupResult } from './types';
 import { createSrs, gradeSrs } from './lib/srs';
@@ -1330,16 +1331,20 @@ function App() {
     const preview = await loadTextbookPreviewFor(bookId);
     const unit = preview?.units[unitIndex];
     if (!unit) return;
-    if (unit.vocabGroups || unit.grammarTopics || unit.exampleSentences) return;
+    // 学习卡版本：2 才视为完整（语法全覆盖 + 长难句 + 写作句）；旧卡片自动重新生成补齐
+    if ((unit.cardVersion ?? 0) >= 2) return;
     setUnitModuleLoading(unitIndex);
     try {
       if (!deepSeekApiKey) {
-        // 无 API Key：本地兜底，仅生成词汇分组
+        // 无 API Key：本地兜底（词汇分组 + 长难句 + 写作句）
         await updateBookPreview(bookId, p => ({
           ...p,
           units: p.units.map((u, i) => i === unitIndex ? ({
             ...u,
             vocabGroups: u.vocabulary.length ? [{ category: '本单元核心词汇', items: u.vocabulary.map(v => ({ word: v.text, translation: v.translation })) }] : [],
+            keySentences: pickKeySentences(u),
+            writingSentences: pickWritingSentences(u),
+            cardVersion: 2,
           }) : u),
         }));
         return;
@@ -1351,7 +1356,13 @@ function App() {
       const content = await callDeepSeekChat(
         { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
         '你是一位资深法语教师（CEFR A2→C2），负责为教材单元生成详细学习卡，讲解用中文。',
-        buildUnitModulePrompt(unit.title, unit.summary, unit.sentences, mdExcerpt || undefined),
+        buildUnitModulePrompt(
+          unit.title,
+          unit.summary,
+          unit.sentences,
+          mdExcerpt || undefined,
+          extractGrammarSection(mdExcerpt) || undefined
+        ),
         8192
       );
       const data = extractJson(content);
@@ -1382,8 +1393,32 @@ function App() {
             zh: String(s?.zh ?? ''),
             fr: String(s?.fr ?? ''),
           })).filter((s: { zh: string; fr: string }) => s.zh && s.fr),
+          keySentences: norm(data?.keySentences).map((k: any) => ({
+            fr: String(k?.fr ?? ''),
+            zh: String(k?.zh ?? ''),
+            analysis: String(k?.analysis ?? ''),
+          })).filter((k: { fr: string }) => k.fr),
+          writingSentences: norm(data?.writingSentences).map((w: any) => ({
+            fr: String(w?.fr ?? ''),
+            zh: String(w?.zh ?? ''),
+            usage: String(w?.usage ?? ''),
+          })).filter((w: { fr: string }) => w.fr),
+          cardVersion: 2,
         }) : u),
       }));
+      // 若 DeepSeek 漏了长难句/写作句（个别情况），用本地提取兜底，保证两类句子不空
+      const fresh = await loadTextbookPreviewFor(bookId);
+      const fu = fresh?.units[unitIndex];
+      if (fu && (!fu.keySentences?.length || !fu.writingSentences?.length)) {
+        await updateBookPreview(bookId, pp => ({
+          ...pp,
+          units: pp.units.map((uu, i) => i === unitIndex ? ({
+            ...uu,
+            keySentences: uu.keySentences?.length ? uu.keySentences : pickKeySentences(uu),
+            writingSentences: uu.writingSentences?.length ? uu.writingSentences : pickWritingSentences(uu),
+          }) : uu),
+        }));
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       await updateBookPreview(bookId, p => ({

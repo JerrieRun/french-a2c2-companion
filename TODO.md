@@ -3,6 +3,7 @@
 > 更新规则：完成一项就勾选 `[x]` 并附日期；新想法追加到「待办」。下次继续开发先看本文件与 AGENTS.md。
 
 ## ✅ 已完成
+- [x] 学习卡补齐（2026-08-08）：语法精华要求完整覆盖教材 Grammaire 章节（提取单元 Markdown 的 Grammaire 段专门喂给 DeepSeek，5-10 个主题逐点覆盖）；新增「重点长难句」（keySentences，法/中/结构解析）与「写作积累句」（writingSentences，法/中/适用场景）；学习卡 cardVersion=2，旧卡片自动重新生成补齐；课程路径「句型精析」模块同步展示长难句+写作句并可逐句 DeepSeek 分析；无 Key 时本地提取兜底（src/lib/studyCard.ts）
 - [x] 多教材支持（2026-08-08）：教材库（IndexedDB 按教材 id 存 PDF/Markdown/解析结果 + localStorage 存元数据）；Supabase 云端按 `user/<uid>/textbooks/<bookId>/` 存多本教材 + manifest 清单；教材中心教材库列表/打开/删除；精读页教材切换器；课程路径每本教材一条课程、进度按教材隔离（`bookId:u:l`）；旧版单教材自动迁移
 - [x] 单元识别修复（2026-08-08）：本地拆分重写（目录页码定位 + 页首标记兜底，支持 Unité/Dossier/Leçon/Chapitre/Séquence/Mission/第X单元）；auto 模式大教材不再截断给 DeepSeek、返回不完整时回退本地；Édito A2 实测 12 单元、页码与目录完全一致（13/27/41…/167）
 - [x] 云端同步错误可视化 + 50MB 兜底（2026-08-08）：上传失败显示真实状态码/响应体；PDF 超过免费档 50MB 时仍同步 Markdown+解析结果，保证跨设备可精读；教材库行显示云端同步状态与「重新同步」按钮

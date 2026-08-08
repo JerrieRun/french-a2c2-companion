@@ -19,10 +19,13 @@ export const buildParsePrompt = (text: string) => {
 };
 
 /** 生成单个单元的「详细学习卡」：分类词汇 + 语法精华 + 常见错误 + 中法例句 */
-export const buildUnitModulePrompt = (unitTitle: string, summary: string, sentences: string[], markdownExcerpt?: string) => {
-  const excerpt = sentences.slice(0, 6).join('\n');
+export const buildUnitModulePrompt = (unitTitle: string, summary: string, sentences: string[], markdownExcerpt?: string, grammarExcerpt?: string) => {
+  const excerpt = sentences.slice(0, 30).join('\n');
   const mdPart = markdownExcerpt
-    ? `\n\n## 单元原文（Markdown 结构，含标题/段落/列表/表格，请优先参考原文结构与用词）\n${markdownExcerpt.slice(0, 6000)}`
+    ? `\n\n## 单元原文（Markdown 结构，含标题/段落/列表/表格，请优先参考原文结构与用词；其中 Grammaire 部分就是本单元教材的语法章节）\n${markdownExcerpt.slice(0, 8000)}`
+    : '';
+  const grammarPart = grammarExcerpt
+    ? `\n\n## 本单元教材的 Grammaire 章节（务必逐点覆盖，一个语法点都不能漏）\n${grammarExcerpt}`
     : '';
   return `System: 你是一位资深法语教师（CEFR A2→C2），请为教材单元生成一份「详细学习卡」，严格输出合法 JSON（不要用 markdown 代码块包裹）。
 
@@ -34,26 +37,35 @@ export const buildUnitModulePrompt = (unitTitle: string, summary: string, senten
     ] }
   ],
   "grammarTopics": [
-    { "title": "语法点名称（如：虚拟式构成）", "explanation": "中文讲解，含规则/构成/用法/例句", "table": [["列名1","列名2"],["单元格","单元格"]] }
+    { "title": "语法点名称（如：Le passé composé 复合过去时）", "explanation": "中文讲解，含规则/构成/用法/例句", "table": [["列名1","列名2"],["单元格","单元格"]] }
   ],
   "commonMistakes": [
     { "wrong": "错误法语句子", "right": "正确法语句子", "note": "中文说明错在哪" }
   ],
   "exampleSentences": [
     { "zh": "中文句", "fr": "对应法语句" }
+  ],
+  "keySentences": [
+    { "fr": "重点长难句（含从句/倒装/虚拟式/条件式等复杂结构）", "zh": "中文翻译", "analysis": "中文结构解析：拆解主句/从句、指出考点与翻译要点" }
+  ],
+  "writingSentences": [
+    { "fr": "可直接用在作文里的高级表达句", "zh": "中文翻译", "usage": "适用场景/写作小贴士（如：议论文提出观点、举例、表因果、结尾总结）" }
   ]
 }
 
 要求：
 1. 词汇按主题分类（3-6 类），每类 4-8 个词条，优先从本单元真实课文里选词，生词必须给中文释义。
-2. 语法 2-4 个主题，讲解要详细、可操作，能用表格就用表格（表格首行为表头）。
+2. 【语法精华必须完整】先仔细扫描上面「单元原文」中 Grammaire 段落（以及课文里出现的语法现象），列出 5-10 个语法主题，逐点覆盖本单元 Grammaire 部分出现的所有语法点（时态/语式/从句/代词/冠词/比较级等），一个都不能漏；每个主题讲解要详细、可操作，能用表格就用表格（表格首行为表头）。
 3. 常见错误 3-5 条，来自本单元最易错的点。
 4. 例句 10 句，中法对照，覆盖本单元核心词汇与语法。
-5. 所有讲解用中文，例句必须真实自然、符合 CEFR 等级。
+5. 重点长难句 5-8 条：必须从本单元真实课文/例句中挑选或改写，挑结构复杂的（含从句、倒装、虚拟式、条件式、代词式动词等），analysis 用中文拆解结构并给翻译要点。
+6. 写作积累句 5-8 条：选地道、可直接套用到作文里的表达（提出观点、举例、因果、让步、总结等），usage 说明适用场景。
+7. 所有讲解用中文，例句必须真实自然、符合 CEFR 等级。
 
 单元标题：${unitTitle}
 单元摘要：${summary}
 ${mdPart}
+${grammarPart}
 单元课文句子（节选）：
 ${excerpt}`;
 };
