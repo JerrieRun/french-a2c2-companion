@@ -52,18 +52,36 @@ insert into storage.buckets (id, name, public)
 values ('textbooks', 'textbooks', false)
 on conflict (id) do nothing;
 
+-- 注意：文件路径是 user/<uid>/...，storage.foldername(name)[1] 是 'user' 而不是 uid，
+-- 旧策略 (storage.foldername(name))[1] = auth.uid() 永远为假，导致上传/下载全部被 RLS 拒绝。
+-- 改用「路径前缀匹配」：name like 'user/<uid>/%'
 drop policy if exists "textbooks_select_own" on storage.objects;
 create policy "textbooks_select_own" on storage.objects
-  for select using (bucket_id = 'textbooks' and (storage.foldername(name))[1] = auth.uid()::text);
+  for select using (
+    bucket_id = 'textbooks'
+    and name like 'user/' || auth.uid()::text || '/%'
+  );
 
 drop policy if exists "textbooks_insert_own" on storage.objects;
 create policy "textbooks_insert_own" on storage.objects
-  for insert with check (bucket_id = 'textbooks' and (storage.foldername(name))[1] = auth.uid()::text);
+  for insert with check (
+    bucket_id = 'textbooks'
+    and name like 'user/' || auth.uid()::text || '/%'
+  );
 
 drop policy if exists "textbooks_update_own" on storage.objects;
 create policy "textbooks_update_own" on storage.objects
-  for update using (bucket_id = 'textbooks' and (storage.foldername(name))[1] = auth.uid()::text);
+  for update using (
+    bucket_id = 'textbooks'
+    and name like 'user/' || auth.uid()::text || '/%'
+  ) with check (
+    bucket_id = 'textbooks'
+    and name like 'user/' || auth.uid()::text || '/%'
+  );
 
 drop policy if exists "textbooks_delete_own" on storage.objects;
 create policy "textbooks_delete_own" on storage.objects
-  for delete using (bucket_id = 'textbooks' and (storage.foldername(name))[1] = auth.uid()::text);
+  for delete using (
+    bucket_id = 'textbooks'
+    and name like 'user/' || auth.uid()::text || '/%'
+  );

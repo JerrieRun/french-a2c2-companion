@@ -348,7 +348,15 @@ function App() {
       setTextbookSync('synced');
     } else {
       setTextbookSync('error');
-      setTextbookSyncError(errors.join('；'));
+      const joined = errors.join('；');
+      // RLS 策略不匹配 → 给出可操作的修复指引
+      if (/row-level security policy|AccessDenied|RLS/i.test(joined)) {
+        setTextbookSyncError(
+          `${joined}。\n\n👉 Supabase Storage 权限策略未正确配置：请在 Supabase 控制台 → SQL Editor 运行仓库 supabase/schema.sql 中「教材存储」一节的脚本（把 RLS 策略改成 user/<uid>/ 前缀匹配），然后重新点「☁️ 重新同步」。`
+        );
+      } else {
+        setTextbookSyncError(joined);
+      }
     }
     return { ok: errors.length === 0, hasPdf: flags.hasPdf, hasMd: flags.hasMd, hasPreview: flags.hasPreview, errors };
   };
