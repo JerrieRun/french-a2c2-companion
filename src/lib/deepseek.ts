@@ -140,7 +140,13 @@ export const extractJson = (text: string): any => {
   const direct = tryParse(cleaned);
   if (direct) return direct;
 
-  // 若 JSON 被截断，尝试逐层去掉末尾不完整片段，找到最长可解析前缀
+  // 截断恢复①：补上缺失的闭合括号（如 {"a":1,"b":[1,2,3] → +} 即可解析）
+  for (let extra = 1; extra <= 6; extra += 1) {
+    const fixed = tryParse(cleaned + '}'.repeat(extra));
+    if (fixed) return fixed;
+  }
+
+  // 截断恢复②：若 JSON 被截断，尝试逐层去掉末尾不完整片段，找到最长可解析前缀
   const start = cleaned.indexOf('{');
   if (start !== -1) {
     let pos = cleaned.lastIndexOf('}');

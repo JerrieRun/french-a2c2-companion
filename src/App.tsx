@@ -11,6 +11,7 @@ import { compressPdf } from './lib/pdfCompress';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
 import type { AnalysisRecord, AnalysisResult, FlashcardSrs, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate, WordLookupResult } from './types';
 import { createSrs, gradeSrs } from './lib/srs';
+import { useDebouncedCloudSync, useLocalStorageState } from './lib/hooks';
 import type { SrsGrade } from './lib/srs';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
@@ -103,32 +104,10 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [materialPreview, setMaterialPreview] = useState<MaterialPreview | null>(null);
   const [candidateWords, setCandidateWords] = useState<WordCandidate[]>([]);
-  const [wordBook, setWordBook] = useState<WordCandidate[]>(() => {
-    try {
-      const raw = window.localStorage.getItem('french-word-book');
-      const data = raw ? JSON.parse(raw) : [];
-      return Array.isArray(data) ? data : [];
-    } catch {
-      return [];
-    }
-  });
-  const [flashcardMastery, setFlashcardMastery] = useState<Record<string, number>>(() => {
-    try {
-      const raw = window.localStorage.getItem('french-flashcard-mastery');
-      return raw ? (JSON.parse(raw) as Record<string, number>) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [wordBook, setWordBook] = useLocalStorageState<WordCandidate[]>('french-word-book', []);
+  const [flashcardMastery, setFlashcardMastery] = useLocalStorageState<Record<string, number>>('french-flashcard-mastery', {});
   // 闪卡间隔重复（SM-2）
-  const [flashcardSrs, setFlashcardSrs] = useState<Record<string, FlashcardSrs>>(() => {
-    try {
-      const raw = window.localStorage.getItem('french-flashcard-srs');
-      return raw ? (JSON.parse(raw) as Record<string, FlashcardSrs>) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [flashcardSrs, setFlashcardSrs] = useLocalStorageState<Record<string, FlashcardSrs>>('french-flashcard-srs', {});
   const [writingResult, setWritingResult] = useState<string | null>(null);
   const [writingPrompt, setWritingPrompt] = useState<string | null>(null);
   const [writingLoading, setWritingLoading] = useState(false);
@@ -162,15 +141,7 @@ function App() {
   const [practiceExercises, setPracticeExercises] = useState<string[]>([]);
   const [deepSeekConfigSaved, setDeepSeekConfigSaved] = useState(false);
   const [deepSeekConfigOpen, setDeepSeekConfigOpen] = useState(false);
-  const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>(() => {
-    try {
-      const raw = window.localStorage.getItem('french-analysis-history');
-      const data = raw ? JSON.parse(raw) : [];
-      return Array.isArray(data) ? data : [];
-    } catch {
-      return [];
-    }
-  });
+  const [analysisHistory, setAnalysisHistory] = useLocalStorageState<AnalysisRecord[]>('french-analysis-history', []);
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [unitModuleLoading, setUnitModuleLoading] = useState<number | null>(null);
@@ -191,13 +162,7 @@ function App() {
   const [compressing, setCompressing] = useState(false);
   const [compressProgress, setCompressProgress] = useState<{ done: number; total: number } | null>(null);
   const [compressResult, setCompressResult] = useState<string | null>(null);
-  const [pathProgress, setPathProgress] = useState<PathProgress>(() => {
-    try {
-      return JSON.parse(window.localStorage.getItem('french-path-progress') || '{}') as PathProgress;
-    } catch {
-      return {};
-    }
-  });
+  const [pathProgress, setPathProgress] = useLocalStorageState<PathProgress>('french-path-progress', {});
 
   useEffect(() => {
     const savedUrl = window.localStorage.getItem('deepseek-api-url');
@@ -363,90 +328,17 @@ function App() {
     setTextbookSync('off');
   };
 
-  /** 路径进度持久化到本地 */
-  useEffect(() => {
-    window.localStorage.setItem('french-path-progress', JSON.stringify(pathProgress));
-  }, [pathProgress]);
-
-  /** 已登录时，学习记录变化后防抖上传云端 */
-  useEffect(() => {
-    if (!authUser) return;
-    setSyncStatus('syncing');
-    const t = setTimeout(() => {
-      void pushUserData('french-word-book', wordBook)
-        .then(() => setSyncStatus('synced'))
-        .catch(() => setSyncStatus('error'));
-    }, 800);
-    return () => clearTimeout(t);
-  }, [wordBook, authUser]);
-  useEffect(() => {
-    if (!authUser) return;
-    setSyncStatus('syncing');
-    const t = setTimeout(() => {
-      void pushUserData('french-flashcard-mastery', flashcardMastery)
-        .then(() => setSyncStatus('synced'))
-        .catch(() => setSyncStatus('error'));
-    }, 800);
-    return () => clearTimeout(t);
-  }, [flashcardMastery, authUser]);
-  useEffect(() => {
-    if (!authUser) return;
-    setSyncStatus('syncing');
-    const t = setTimeout(() => {
-      void pushUserData('french-flashcard-srs', flashcardSrs)
-        .then(() => setSyncStatus('synced'))
-        .catch(() => setSyncStatus('error'));
-    }, 800);
-    return () => clearTimeout(t);
-  }, [flashcardSrs, authUser]);
-  useEffect(() => {
-    if (!authUser) return;
-    setSyncStatus('syncing');
-    const t = setTimeout(() => {
-      void pushUserData('french-analysis-history', analysisHistory)
-        .then(() => setSyncStatus('synced'))
-        .catch(() => setSyncStatus('error'));
-    }, 800);
-    return () => clearTimeout(t);
-  }, [analysisHistory, authUser]);
-  useEffect(() => {
-    if (!authUser) return;
-    setSyncStatus('syncing');
-    const t = setTimeout(() => {
-      void pushUserData('french-path-progress', pathProgress)
-        .then(() => setSyncStatus('synced'))
-        .catch(() => setSyncStatus('error'));
-    }, 800);
-    return () => clearTimeout(t);
-  }, [pathProgress, authUser]);
-  useEffect(() => {
-    if (!authUser || !materialPreview) return;
-    setSyncStatus('syncing');
-    const t = setTimeout(() => {
-      void pushUserData('french-preview', materialPreview)
-        .then(() => setSyncStatus('synced'))
-        .catch(() => setSyncStatus('error'));
-    }, 800);
-    return () => clearTimeout(t);
-  }, [materialPreview, authUser]);
+  /** 已登录时，学习记录变化后防抖上传云端（统一走 useDebouncedCloudSync） */
+  useDebouncedCloudSync('french-word-book', wordBook, !!authUser, setSyncStatus);
+  useDebouncedCloudSync('french-flashcard-mastery', flashcardMastery, !!authUser, setSyncStatus);
+  useDebouncedCloudSync('french-flashcard-srs', flashcardSrs, !!authUser, setSyncStatus);
+  useDebouncedCloudSync('french-analysis-history', analysisHistory, !!authUser, setSyncStatus);
+  useDebouncedCloudSync('french-path-progress', pathProgress, !!authUser, setSyncStatus);
+  useDebouncedCloudSync('french-preview', materialPreview, !!authUser && !!materialPreview, setSyncStatus);
 
   useEffect(() => {
     if (materialPreview) savePreview(materialPreview);
   }, [materialPreview]);
-
-  useEffect(() => {
-    window.localStorage.setItem('french-word-book', JSON.stringify(wordBook));
-  }, [wordBook]);
-  useEffect(() => {
-    window.localStorage.setItem('french-flashcard-mastery', JSON.stringify(flashcardMastery));
-  }, [flashcardMastery]);
-  useEffect(() => {
-    window.localStorage.setItem('french-flashcard-srs', JSON.stringify(flashcardSrs));
-  }, [flashcardSrs]);
-
-  useEffect(() => {
-    window.localStorage.setItem('french-analysis-history', JSON.stringify(analysisHistory));
-  }, [analysisHistory]);
 
   useEffect(() => {
     window.localStorage.setItem('deepseek-api-url', deepSeekApiUrl);

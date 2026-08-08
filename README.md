@@ -86,3 +86,24 @@ Markdown 精读页把教材转为结构化 Markdown（标题 / 段落 / 列表 /
 
 > 说明：MarkItDown（https://github.com/microsoft/markitdown ）是微软开源的 PDF/Word/PPT→Markdown 工具；
 > 应用内置的浏览器端转换器采用相同思路（按坐标/字号重建结构），两者可互补使用。
+
+## 国内访问优化（可选迁移：Vercel → Cloudflare Pages）
+
+当前部署在 Vercel（https://french-a2c2-companion.vercel.app），国内访问偶尔偏慢。
+如需更快的国内体验，可迁移到 Cloudflare Pages（全球 CDN + 国内边缘节点，免费额度充足）：
+
+1. Cloudflare 控制台 → **Workers & Pages → Create → Pages → Connect to Git**，选择本仓库（`JerrieRun/french-a2c2-companion`）。
+2. 构建设置：Framework preset 选 **Vite**；Build command `npm run build`；Build output directory `dist`。
+3. 环境变量（与 Vercel 相同）：
+   - `VITE_SUPABASE_URL=https://kaecartwcmqobenpkpjx.supabase.co`
+   - `VITE_SUPABASE_ANON_KEY=你的 anon key`
+4. 部署完成后，访问 `https://<project>.pages.dev` 验证；SPA 回退已由仓库根目录 `public/_redirects`（`/* /index.html 200`）处理，无需额外配置。
+5. 自定义域名：Pages → Custom domains 添加你的域名并配置 CNAME。
+
+> 说明：`public/_redirects` 只对 Cloudflare Pages 生效（Vercel 自动处理 SPA 回退，忽略该文件）。
+> 迁移前请先在两个平台都配好 Supabase 环境变量；Supabase 后台的 Site URL / 回调地址也要把新域名加入白名单。
+
+## 自动化测试与 CI
+
+- 单元测试：`npm test`（Vitest，覆盖 SRS 间隔重复、DeepSeek JSON 容错、单元练习生成、Markdown 分页工具等纯逻辑）。
+- CI：`.github/workflows/ci.yml` 在 push/PR 时自动执行 `npm ci && npm run build && npm test`。

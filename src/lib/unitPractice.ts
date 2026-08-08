@@ -41,23 +41,29 @@ export function normalizePractice(data: any): UnitPractice {
       }))
       .filter((it: { wrong: string; right: string }) => it.wrong && it.right);
 
+  const listeningItems = normItems(data?.listening?.items);
+  const readingItems = normItems(data?.reading?.items);
+  const grammarItems = normItems(data?.grammar?.items);
+  const clozeItems = normItems(data?.cloze?.items);
+  const vocabItems = normItems(data?.vocabulary?.items);
+
   return {
-    listening: data?.listening
+    listening: data?.listening && listeningItems.length
       ? {
           instructions: str(data.listening.instructions),
           instructionsZh: data.listening.instructionsZh ? str(data.listening.instructionsZh) : undefined,
           transcript: str(data.listening.transcript),
-          items: normItems(data.listening.items),
+          items: listeningItems,
         }
       : undefined,
-    reading: data?.reading
-      ? { passage: str(data.reading.passage), items: normItems(data.reading.items) }
+    reading: data?.reading && readingItems.length
+      ? { passage: str(data.reading.passage), items: readingItems }
       : undefined,
-    grammar: data?.grammar ? { items: normItems(data.grammar.items) } : undefined,
-    cloze: data?.cloze
-      ? { title: str(data.cloze.title), text: str(data.cloze.text), items: normItems(data.cloze.items) }
+    grammar: grammarItems.length ? { items: grammarItems } : undefined,
+    cloze: data?.cloze && clozeItems.length
+      ? { title: str(data.cloze.title), text: str(data.cloze.text), items: clozeItems }
       : undefined,
-    vocabulary: data?.vocabulary ? { items: normItems(data.vocabulary.items) } : undefined,
+    vocabulary: vocabItems.length ? { items: vocabItems } : undefined,
     ordering: data?.ordering ? { items: normOrdering(data.ordering.items) } : undefined,
     correction: data?.correction ? { items: normCorrection(data.correction.items) } : undefined,
     writing: data?.writing

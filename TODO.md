@@ -12,6 +12,9 @@
 - [x] 生词本（localStorage 持久化）
 - [x] 进度页：分析历史复盘、清空、导出
 - [x] 课程路径改造（2026-08-07）：每单元 9 个模块（精读/句型/词汇/语法/常见错误/例句/跟读/闪卡/单元练习），内容来自 DeepSeek 详细学习卡；点击模块打开全屏独立页面；学完可进入对应练习；「单元练习」为最后模块，覆盖考级（DELF/DALF/TCF）全部题型（听力/阅读/语法/完形/词汇/排序/改错/写作复述/口语复述）
+- [x] 自动测试（Vitest）+ CI（2026-08-08）：19 个单元测试（SRS 间隔重复/DeepSeek JSON 容错/单元练习/Markdown 分页）；GitHub Actions 自动 build+test
+- [x] 国内访问优化准备（2026-08-08）：README 迁移 Cloudflare Pages 步骤 + public/_redirects SPA 回退（Vercel 上继续可用）
+- [x] App.tsx 拆分 hooks（2026-08-08）：新增 src/lib/hooks.ts（useLocalStorageState / useDebouncedCloudSync），生词本/熟练度/SRS/历史/路径进度与 6 组云同步改为 hooks，App 缩减约百行
 - [x] PWA / 离线可用（2026-08-08）：manifest + 图标 + Service Worker（缓存同源资源），首次访问自动刷新后断网可离线使用
 - [x] Markdown 精读：生词高亮（生词本词黄色高亮）+ 双语对照（逐段「🌐 中译」，DeepSeek 翻译，点开显示中文）
 - [x] 移除未使用的 react-router-dom 依赖（2026-08-08）
