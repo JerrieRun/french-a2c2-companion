@@ -7,6 +7,7 @@ import { buildDeepSeekPrompt, buildParsePrompt, buildPracticePrompt, buildUnitMo
   callDeepSeekChat, extractJson, isOfficialDeepSeekUrl, resolveCustomEndpoint } from './lib/deepseek';
 import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, savePreview, saveTextbookMarkdown, loadTextbookMarkdown, clearTextbookMarkdown } from './lib/storage';
 import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
+import { compressPdf } from './lib/pdfCompress';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
 import type { AnalysisRecord, AnalysisResult, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate, WordLookupResult } from './types';
 import { LearnTab } from './tabs/LearnTab';
@@ -129,6 +130,10 @@ function App() {
   const [syncStatus, setSyncStatus] = useState<'off' | 'syncing' | 'synced' | 'error'>('off');
   // 教材云端同步状态（PDF + Markdown 上传 Supabase Storage）
   const [textbookSync, setTextbookSync] = useState<'off' | 'syncing' | 'synced' | 'error'>('off');
+  // 大文件自动压缩
+  const [compressing, setCompressing] = useState(false);
+  const [compressProgress, setCompressProgress] = useState<{ done: number; total: number } | null>(null);
+  const [compressResult, setCompressResult] = useState<string | null>(null);
   const [pathProgress, setPathProgress] = useState<PathProgress>(() => {
     try {
       return JSON.parse(window.localStorage.getItem('french-path-progress') || '{}') as PathProgress;
@@ -503,7 +508,27 @@ function App() {
     }
 
     try {
-      const arrayBuffer = await file.arrayBuffer();
+      let arrayBuffer = await file.arrayBuffer();
+      // 超过阈值自动压缩（渲染压缩 + 隐形文字层），便于上传 Supabase（免费额度 50MB）
+      if (arrayBuffer.byteLength > 45 * 1024 * 1024) {
+        setCompressing(true);
+        setCompressProgress({ done: 0, total: 0 });
+        setCompressResult(null);
+        try {
+          const originalSize = arrayBuffer.byteLength; // pdf.js 可能 detach 原 buffer，先记录
+          const compressed = await compressPdf(arrayBuffer, (done, total) => setCompressProgress({ done, total }));
+          const before = (originalSize / 1048576).toFixed(0);
+          const after = (compressed.byteLength / 1048576).toFixed(1);
+          arrayBuffer = compressed;
+          setCompressResult(`🗜️ 已自动压缩：${before}MB → ${after}MB（文字层已保留，精读/查词不受影响）`);
+        } catch (e) {
+          console.error('PDF 自动压缩失败，改用原文件：', e);
+          setCompressResult(null);
+        } finally {
+          setCompressing(false);
+          setCompressProgress(null);
+        }
+      }
       // pdfjs 可能 detach 原始 buffer，先复制一份用于本地保存
       const pdfStorageCopy = arrayBuffer.slice(0);
       const { fullText, pages, pdfDoc } = await extractTextFromPdf(arrayBuffer);
@@ -1875,6 +1900,9 @@ function App() {
       onLookupWord={ lookupWord }
       onCloseWordLookup={ handleCloseWordLookup }
       textbookSync={ textbookSync }
+      compressing={ compressing }
+      compressProgress={ compressProgress }
+      compressResult={ compressResult }
       handleGeneratePractice={ handleGeneratePractice }
       testDeepSeekConnection={ testDeepSeekConnection }
       translateSentence={ translateSentence }

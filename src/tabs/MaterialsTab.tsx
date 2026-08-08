@@ -98,6 +98,10 @@ type MaterialsTabProps = {
   onCloseWordLookup: () => void;
   // 教材云端同步状态
   textbookSync: 'off' | 'syncing' | 'synced' | 'error';
+  // 大文件自动压缩
+  compressing: boolean;
+  compressProgress: { done: number; total: number } | null;
+  compressResult: string | null;
 };
 
 export function MaterialsTab(props: MaterialsTabProps) {
@@ -122,7 +126,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
     intensiveResult, intensiveLoading, onCloseIntensive,
     wordLookup, wordLookupLoading, onLookupWord, onCloseWordLookup,
-    textbookSync,
+    textbookSync, compressing, compressProgress, compressResult,
   } = props;
   const importMdRef = useRef<HTMLInputElement>(null);
 
@@ -457,6 +461,23 @@ export function MaterialsTab(props: MaterialsTabProps) {
       )}
       {error && <div className="mt-4 rounded-3xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>}
       {loading && <p className="mt-4 text-sm text-slate-600">正在提取，请稍候...</p>}
+      {compressing && (
+        <div className="mt-4 rounded-3xl border border-sky/40 bg-sky/10 p-4">
+          <p className="text-sm font-semibold text-slate-700">🗜️ 正在自动压缩大文件教材（保留文字层，便于云端同步）…</p>
+          <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
+            <div
+              className="h-full rounded-full bg-coral transition-all duration-300"
+              style={{ width: compressProgress && compressProgress.total ? `${Math.max(4, Math.round((compressProgress.done / compressProgress.total) * 100))}%` : '8%' }}
+            />
+          </div>
+          <p className="mt-2 text-xs text-slate-500">
+            {compressProgress?.total ? `已压缩 ${compressProgress.done} / ${compressProgress.total} 页` : '准备中…'}
+          </p>
+        </div>
+      )}
+      {compressResult && (
+        <div className="mt-4 rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{compressResult}</div>
+      )}
     </div>
 
   </div>
