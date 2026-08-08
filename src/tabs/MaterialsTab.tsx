@@ -96,6 +96,7 @@ type MaterialsTabProps = {
   wordLookupLoading: boolean;
   onLookupWord: (word: string, context?: string) => Promise<void> | void;
   onCloseWordLookup: () => void;
+  onUpdateWordTranslation: (word: string, translation: string) => void;
   // 教材云端同步状态
   textbookSync: 'off' | 'syncing' | 'synced' | 'error';
   // 大文件自动压缩
@@ -125,7 +126,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     readerMode, setReaderMode, textbookMarkdown, mdStatus, mdProgress, mdError, mdSource,
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
     intensiveResult, intensiveLoading, onCloseIntensive,
-    wordLookup, wordLookupLoading, onLookupWord, onCloseWordLookup,
+    wordLookup, wordLookupLoading, onLookupWord, onCloseWordLookup, onUpdateWordTranslation,
     textbookSync, compressing, compressProgress, compressResult,
   } = props;
   const importMdRef = useRef<HTMLInputElement>(null);
@@ -631,7 +632,12 @@ export function MaterialsTab(props: MaterialsTabProps) {
         onClose={onCloseIntensive}
         word={wordLookup}
         wordLoading={wordLookupLoading}
-        onAddWord={onAddWord}
+        onAddWord={word => {
+          onAddWord(word);
+          // 查词结果有释义时，直接用它更新生词本词条
+          const t = wordLookup?.defs?.[0];
+          if (t && !t.includes('本地词典') && !t.includes('API Key')) onUpdateWordTranslation(word, t);
+        }}
         onCloseWord={onCloseWordLookup}
       />
     </>

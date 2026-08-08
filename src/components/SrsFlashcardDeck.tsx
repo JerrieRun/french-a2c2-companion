@@ -12,6 +12,7 @@ type SrsFlashcardDeckProps = {
   onSrsReview: (word: string, grade: SrsGrade) => void;
   onExportWordBook: () => void;
   onImportWordBook: (text: string, fileName: string) => void;
+  onBackfillTranslations: () => Promise<number>;
 };
 
 const shuffle = <T,>(arr: T[]): T[] => {
@@ -25,7 +26,7 @@ const shuffle = <T,>(arr: T[]): T[] => {
 
 const normalize = (s: string) => s.trim().toLowerCase().replace(/[’']/g, "'");
 
-export function SrsFlashcardDeck({ words, srs, onSrsReview, onExportWordBook, onImportWordBook }: SrsFlashcardDeckProps) {
+export function SrsFlashcardDeck({ words, srs, onSrsReview, onExportWordBook, onImportWordBook, onBackfillTranslations }: SrsFlashcardDeckProps) {
   const [filter, setFilter] = useState<Cefr>('all');
   const [mode, setMode] = useState<'card' | 'spell'>('card');
   const [flipped, setFlipped] = useState(false);
@@ -35,6 +36,8 @@ export function SrsFlashcardDeck({ words, srs, onSrsReview, onExportWordBook, on
   const [spellChecked, setSpellChecked] = useState<boolean | null>(null);
   const [spellWrong, setSpellWrong] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+  const [backfillMsg, setBackfillMsg] = useState<string | null>(null);
+  const [backfilling, setBackfilling] = useState(false);
 
   const now = useMemo(() => Date.now(), []);
   const [overrideQueue, setOverrideQueue] = useState<WordCandidate[] | null>(null);
@@ -126,8 +129,25 @@ export function SrsFlashcardDeck({ words, srs, onSrsReview, onExportWordBook, on
         <div>
           <h3 className="text-lg font-semibold text-slate-900">单词闪卡 · 间隔重复 🃏</h3>
           <p className="mt-1 text-xs text-slate-500">今日待复习 {dueCount} · 新词 {newCount} · 共 {total} 词</p>
+          {backfillMsg && <p className="mt-1 text-xs font-medium text-emerald-700">{backfillMsg}</p>}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {words.some(w => !w.translation || w.translation === '待补充') && (
+            <button
+              type="button"
+              disabled={backfilling}
+              onClick={async () => {
+                setBackfilling(true);
+                setBackfillMsg(null);
+                const n = await onBackfillTranslations();
+                setBackfillMsg(n > 0 ? `✅ 已补全 ${n} 个释义` : '没有可补全的释义（需配置 DeepSeek API Key）');
+                setBackfilling(false);
+              }}
+              className="rounded-2xl bg-lavender/50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-lavender disabled:opacity-50"
+            >
+              {backfilling ? '补全中…' : '🔧 补全释义'}
+            </button>
+          )}
           <button type="button" onClick={onExportWordBook} className="rounded-2xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-100">⬇️ 导出</button>
           <button type="button" onClick={() => importRef.current?.click()} className="rounded-2xl bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-100">📥 导入</button>
           <input ref={importRef} type="file" accept=".csv,.txt,.json,text/csv" className="hidden" onChange={handleImportFile} />

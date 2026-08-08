@@ -11,6 +11,7 @@ type LearnTabProps = {
   onSrsReview: (word: string, grade: SrsGrade) => void;
   onExportWordBook: () => void;
   onImportWordBook: (text: string, fileName: string) => void;
+  onBackfillTranslations: () => Promise<number>;
   writingLoading: boolean;
   writingResult: string | null;
   writingPrompt?: string | null;
@@ -26,6 +27,7 @@ export function LearnTab({
   onSrsReview,
   onExportWordBook,
   onImportWordBook,
+  onBackfillTranslations,
   writingLoading,
   writingResult,
   writingPrompt,
@@ -42,6 +44,7 @@ export function LearnTab({
         onSrsReview={onSrsReview}
         onExportWordBook={onExportWordBook}
         onImportWordBook={onImportWordBook}
+        onBackfillTranslations={onBackfillTranslations}
       />
       <GrammarPractice loading={grammarLoading} exercises={grammarExercises} onGenerate={onGrammarGenerate} />
       <WritingPractice loading={writingLoading} result={writingResult} onCorrect={onWritingCorrection} initialPrompt={writingPrompt} />

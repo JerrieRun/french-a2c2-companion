@@ -103,10 +103,32 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [materialPreview, setMaterialPreview] = useState<MaterialPreview | null>(null);
   const [candidateWords, setCandidateWords] = useState<WordCandidate[]>([]);
-  const [wordBook, setWordBook] = useState<WordCandidate[]>([]);
-  const [flashcardMastery, setFlashcardMastery] = useState<Record<string, number>>({});
+  const [wordBook, setWordBook] = useState<WordCandidate[]>(() => {
+    try {
+      const raw = window.localStorage.getItem('french-word-book');
+      const data = raw ? JSON.parse(raw) : [];
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  });
+  const [flashcardMastery, setFlashcardMastery] = useState<Record<string, number>>(() => {
+    try {
+      const raw = window.localStorage.getItem('french-flashcard-mastery');
+      return raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    } catch {
+      return {};
+    }
+  });
   // 闪卡间隔重复（SM-2）
-  const [flashcardSrs, setFlashcardSrs] = useState<Record<string, FlashcardSrs>>({});
+  const [flashcardSrs, setFlashcardSrs] = useState<Record<string, FlashcardSrs>>(() => {
+    try {
+      const raw = window.localStorage.getItem('french-flashcard-srs');
+      return raw ? (JSON.parse(raw) as Record<string, FlashcardSrs>) : {};
+    } catch {
+      return {};
+    }
+  });
   const [writingResult, setWritingResult] = useState<string | null>(null);
   const [writingPrompt, setWritingPrompt] = useState<string | null>(null);
   const [writingLoading, setWritingLoading] = useState(false);
@@ -140,7 +162,15 @@ function App() {
   const [practiceExercises, setPracticeExercises] = useState<string[]>([]);
   const [deepSeekConfigSaved, setDeepSeekConfigSaved] = useState(false);
   const [deepSeekConfigOpen, setDeepSeekConfigOpen] = useState(false);
-  const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>([]);
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisRecord[]>(() => {
+    try {
+      const raw = window.localStorage.getItem('french-analysis-history');
+      const data = raw ? JSON.parse(raw) : [];
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  });
   const [expandedHistoryIndex, setExpandedHistoryIndex] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [unitModuleLoading, setUnitModuleLoading] = useState<number | null>(null);
@@ -185,39 +215,7 @@ function App() {
     if (savedModel) setDeepSeekModel(savedModel);
     if (savedOfficialUrl) setDeepSeekOfficialUrl(savedOfficialUrl);
 
-    const savedWordBook = window.localStorage.getItem('french-word-book');
-    const savedMastery = window.localStorage.getItem('french-flashcard-mastery');
-    if (savedMastery) {
-      try {
-        setFlashcardMastery(JSON.parse(savedMastery));
-      } catch (error) {
-        console.warn('加载闪卡熟练度失败：', error);
-      }
-    }
-    const savedSrs = window.localStorage.getItem('french-flashcard-srs');
-    if (savedSrs) {
-      try {
-        setFlashcardSrs(JSON.parse(savedSrs));
-      } catch (error) {
-        console.warn('加载闪卡间隔重复数据失败：', error);
-      }
-    }
-    if (savedWordBook) {
-      try {
-        setWordBook(JSON.parse(savedWordBook));
-      } catch (error) {
-        console.warn('加载生词本失败：', error);
-      }
-    }
-
-    const savedHistory = window.localStorage.getItem('french-analysis-history');
-    if (savedHistory) {
-      try {
-        setAnalysisHistory(JSON.parse(savedHistory));
-      } catch (error) {
-        console.warn('加载分析历史失败：', error);
-      }
-    }
+    // 生词本/熟练度/SRS/分析历史均已用 useState 惰性初始化（从 localStorage 读取）
     void restoreSavedMaterial();
   }, []);
 
@@ -1608,15 +1606,73 @@ function App() {
     }
   };
 
+  /** 用 DeepSeek 补一个词的简洁中文释义，并回写生词本 */
+  const fillWordTranslation = async (word: string) => {
+    if (!deepSeekApiKey) return;
+    try {
+      const content = await callDeepSeekChat(
+        { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+        '你是一位法语词典。请给出该法语单词最常用的简洁中文释义，只输出一个词或短语，不要解释，不要加引号。',
+        `单词：${word}`,
+        256
+      );
+      const t = (content || '').trim().replace(/^["'“”]+|["'“”]+$/g, '');
+      if (t && t !== '待补充') {
+        setWordBook(prev => prev.map(w => w.text === word ? ({ ...w, translation: t.slice(0, 60) }) : w));
+      }
+    } catch (e) {
+      console.warn('补全释义失败：', e);
+    }
+  };
+
+  /** 按词更新释义（查词结果直用） */
+  const handleUpdateWordTranslation = (word: string, translation: string) => {
+    const t = (translation || '').trim().slice(0, 60);
+    if (!t || t === '待补充') return;
+    setWordBook(prev => prev.map(w => w.text === word ? ({ ...w, translation: t }) : w));
+  };
+
+  /** 一键补全生词本中所有「待补充」释义（DeepSeek 批量），返回补全数量 */
+  const backfillWordTranslations = async (): Promise<number> => {
+    const missing = wordBook.filter(w => !w.translation || w.translation === '待补充');
+    if (!missing.length || !deepSeekApiKey) return 0;
+    const batch = missing.slice(0, 40);
+    try {
+      const content = await callDeepSeekChat(
+        { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+        '你是一位法语词典。为下列法语单词给出简洁中文释义，严格输出合法 JSON（不要用 markdown 代码块包裹）：{"单词1":"释义1","单词2":"释义2"}。',
+        `单词列表：${batch.map(w => w.text).join('、')}`,
+        2048
+      );
+      const data = extractJson(content);
+      const map: Record<string, string> = {};
+      for (const w of batch) {
+        const t = data?.[w.text];
+        if (typeof t === 'string' && t.trim() && t.trim() !== '待补充') map[w.text] = t.trim().slice(0, 60);
+      }
+      const keys = Object.keys(map);
+      if (keys.length) {
+        setWordBook(prev => prev.map(w => (map[w.text] && (!w.translation || w.translation === '待补充')) ? ({ ...w, translation: map[w.text] }) : w));
+      }
+      return keys.length;
+    } catch (e) {
+      console.warn('批量补全释义失败：', e);
+      return 0;
+    }
+  };
+
   const handleAddSelectedWord = (text: string) => {
     const word = text.trim().split(/\s+/)[0].replace(/[^a-zàâçéèêëîïôûùüÿæœ]/gi, '').toLowerCase();
     if (!word) return;
+    const translation = translateWord(word);
     handleAddToWordBook({
       text: word,
       cefr: getCeFrTag(word),
-      translation: translateWord(word),
+      translation,
       frequency: 1,
     });
+    // 本地词典没有释义时，异步用 DeepSeek 补真实释义
+    if (translation === '待补充' && deepSeekApiKey) void fillWordTranslation(word);
   };
 
   const runWritingCorrection = async (text: string) => {
@@ -1923,6 +1979,7 @@ function App() {
       onSrsReview={handleSrsReview}
       onExportWordBook={handleExportWordBook}
       onImportWordBook={handleImportWordBook}
+      onBackfillTranslations={backfillWordTranslations}
       writingLoading={writingLoading}
       writingResult={writingResult}
       writingPrompt={writingPrompt}
@@ -2009,6 +2066,7 @@ function App() {
       wordLookupLoading={ wordLookupLoading }
       onLookupWord={ lookupWord }
       onCloseWordLookup={ handleCloseWordLookup }
+      onUpdateWordTranslation={ handleUpdateWordTranslation }
       textbookSync={ textbookSync }
       compressing={ compressing }
       compressProgress={ compressProgress }
