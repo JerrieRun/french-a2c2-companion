@@ -15,7 +15,7 @@ import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import { compressPdf } from './lib/pdfCompress';
 import { buildLocalMaterialPreview, buildLocalUnitsFromText, LOCAL_PARSE_VERSION } from './lib/units';
 import { extractWordCandidates, getCeFrTag, translateSentence, translateWord } from './lib/words';
-import { extractGrammarSection, pickKeySentences, pickWritingSentences } from './lib/studyCard';
+import { extractGrammarSections, pickKeySentences, pickWritingSentences } from './lib/studyCard';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
 import type { AnalysisRecord, AnalysisResult, FlashcardSrs, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, TextbookMeta, UnitSection, WordCandidate, WordLookupResult } from './types';
 import { createSrs, gradeSrs } from './lib/srs';
@@ -1332,7 +1332,7 @@ function App() {
     const unit = preview?.units[unitIndex];
     if (!unit) return;
     // 学习卡版本：2 才视为完整（语法全覆盖 + 长难句 + 写作句）；旧卡片自动重新生成补齐
-    if ((unit.cardVersion ?? 0) >= 2) return;
+    if ((unit.cardVersion ?? 0) >= 3) return;
     setUnitModuleLoading(unitIndex);
     try {
       if (!deepSeekApiKey) {
@@ -1344,7 +1344,7 @@ function App() {
             vocabGroups: u.vocabulary.length ? [{ category: '本单元核心词汇', items: u.vocabulary.map(v => ({ word: v.text, translation: v.translation })) }] : [],
             keySentences: pickKeySentences(u),
             writingSentences: pickWritingSentences(u),
-            cardVersion: 2,
+            cardVersion: 3,
           }) : u),
         }));
         return;
@@ -1361,7 +1361,7 @@ function App() {
           unit.summary,
           unit.sentences,
           mdExcerpt || undefined,
-          extractGrammarSection(mdExcerpt) || undefined
+          extractGrammarSections(mdExcerpt) || undefined
         ),
         8192
       );
@@ -1403,7 +1403,7 @@ function App() {
             zh: String(w?.zh ?? ''),
             usage: String(w?.usage ?? ''),
           })).filter((w: { fr: string }) => w.fr),
-          cardVersion: 2,
+          cardVersion: 3,
         }) : u),
       }));
       // 若 DeepSeek 漏了长难句/写作句（个别情况），用本地提取兜底，保证两类句子不空

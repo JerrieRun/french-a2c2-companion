@@ -17,7 +17,7 @@ export function UnitStudyModule({ unit, loading, onGenerate }: UnitStudyModulePr
     unit.writingSentences?.length
   );
   // 旧版学习卡（未含长难句/写作句）需要重新生成补齐
-  const needsRegenerate = hasContent && (unit.cardVersion ?? 0) < 2;
+  const needsRegenerate = hasContent && (unit.cardVersion ?? 0) < 3;
 
   if (!hasContent) {
     return (

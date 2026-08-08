@@ -22,7 +22,7 @@ export const buildParsePrompt = (text: string) => {
 export const buildUnitModulePrompt = (unitTitle: string, summary: string, sentences: string[], markdownExcerpt?: string, grammarExcerpt?: string) => {
   const excerpt = sentences.slice(0, 30).join('\n');
   const mdPart = markdownExcerpt
-    ? `\n\n## 单元原文（Markdown 结构，含标题/段落/列表/表格，请优先参考原文结构与用词；其中 Grammaire 部分就是本单元教材的语法章节）\n${markdownExcerpt.slice(0, 8000)}`
+    ? `\n\n## 单元原文（完整 Markdown：含标题/段落/列表/表格，务必完整读完；本单元通常有 3 个 Grammaire 小节，可能以字母间距碎片形式出现如 "Gra Gra Gr Gr Grammaire …"，请逐一找出并覆盖其全部语法内容）\n${markdownExcerpt.slice(0, 40000)}`
     : '';
   const grammarPart = grammarExcerpt
     ? `\n\n## 本单元教材的 Grammaire 章节（务必逐点覆盖，一个语法点都不能漏）\n${grammarExcerpt}`
@@ -55,7 +55,7 @@ export const buildUnitModulePrompt = (unitTitle: string, summary: string, senten
 
 要求：
 1. 词汇按主题分类（3-6 类），每类 4-8 个词条，优先从本单元真实课文里选词，生词必须给中文释义。
-2. 【语法精华必须完整】先仔细扫描上面「单元原文」中 Grammaire 段落（以及课文里出现的语法现象），列出 5-10 个语法主题，逐点覆盖本单元 Grammaire 部分出现的所有语法点（时态/语式/从句/代词/冠词/比较级等），一个都不能漏；每个主题讲解要详细、可操作，能用表格就用表格（表格首行为表头）。
+2. 【语法精华必须完整】本单元通常有 3 个 Grammaire 小节，请逐一定位并覆盖每个小节的全部语法点（时态/语式/从句/代词/冠词/比较级等），一个都不能漏；列出 5-10 个语法主题（如只有 3 个小节就把每节拆细），每个主题讲解要详细、可操作，能用表格就用表格（表格首行为表头）。
 3. 常见错误 3-5 条，来自本单元最易错的点。
 4. 例句 10 句，中法对照，覆盖本单元核心词汇与语法。
 5. 重点长难句 5-8 条：必须从本单元真实课文/例句中挑选或改写，挑结构复杂的（含从句、倒装、虚拟式、条件式、代词式动词等），analysis 用中文拆解结构并给翻译要点。

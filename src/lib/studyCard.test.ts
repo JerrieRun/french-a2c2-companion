@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { UnitSection } from '../types';
-import { extractGrammarSection, pickKeySentences, pickWritingSentences } from './studyCard';
+import { extractGrammarSections, pickKeySentences, pickWritingSentences } from './studyCard';
 
 const unit: UnitSection = {
   title: 'Unité 1',
@@ -55,28 +55,30 @@ describe('pickWritingSentences 写作积累句', () => {
   });
 });
 
-describe('extractGrammarSection', () => {
-  it('从单元 Markdown 中提取 Grammaire 章节', () => {
+describe('extractGrammarSections', () => {
+  it('提取单元内全部 Grammaire 小节（含字母间距碎片标题）', () => {
     const md = [
       '# Unité 1',
       '## Documents',
       'texte de la leçon…',
-      '## Grammaire',
+      'Gra Gra Gr Gr Grammaire Grammaire Gr Gr am am',
       '### Le passé composé',
       'On le forme avec être ou avoir…',
+      '## Grammaire',
       '### La phrase négative',
       'ne… pas…',
       '## Lexique',
       'les mots de la leçon',
     ].join('\n');
-    const g = extractGrammarSection(md);
-    expect(g).toContain('## Grammaire');
+    const g = extractGrammarSections(md);
     expect(g).toContain('Le passé composé');
     expect(g).toContain('La phrase négative');
-    expect(g).not.toContain('## Lexique');
+    // 两个小节都在
+    const parts = g.split('---');
+    expect(parts.length).toBeGreaterThanOrEqual(2);
   });
 
   it('没有 Grammaire 时返回空', () => {
-    expect(extractGrammarSection('## Vocabulaire\nrien')).toBe('');
+    expect(extractGrammarSections('## Vocabulaire\nrien')).toBe('');
   });
 });

@@ -100,7 +100,7 @@ export function ModuleDetailPage(props: ModuleDetailPageProps) {
 
   // 需要学习卡的模块：进入页面时若尚未生成（或旧版卡片缺长难句/写作句）则自动重新生成
   useEffect(() => {
-    if (lesson?.needsCard && (!cardReady || (unit.cardVersion ?? 0) < 2) && unitModuleLoading !== unitIndex) {
+    if (lesson?.needsCard && (!cardReady || (unit.cardVersion ?? 0) < 3) && unitModuleLoading !== unitIndex) {
       void onGenerateUnitModule(unitIndex);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

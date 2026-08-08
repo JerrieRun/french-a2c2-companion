@@ -52,20 +52,59 @@ export function pickWritingSentences(unit: UnitSection, max = 6): Array<{ fr: st
   }));
 }
 
-/** 从单元 Markdown 片段中提取「Grammaire」章节（含标题行），用于保证语法精华完整覆盖教材语法 */
-export function extractGrammarSection(markdown: string, maxChars = 4000): string {
+/** 是否为「Grammaire」小节标记行：干净标题，或字母间距碎片化的标题（如 "Gra Gra Gr Gr Grammaire Grammaire …"） */
+function isGrammarMarker(line: string): boolean {
+  const t = line.trim();
+  if (!/Grammaire/i.test(t)) return false;
+  if (t.length > 300) return false;
+  if (/^#{1,6}\s*Grammaire/i.test(t)) return true;
+  // 碎片化标题：空格分隔的 token 大多是 ≤3 个字符的碎片
+  const tokens = t.split(/\s+/).filter(Boolean);
+  if (tokens.length < 3) return false;
+  const short = tokens.filter(tok => tok.length <= 3).length;
+  return short / tokens.length > 0.4;
+}
+
+/** 从单元 Markdown 中提取全部「Grammaire」小节（每个单元通常有 3 个），拼接返回 */
+export function extractGrammarSections(markdown: string, maxTotal = 12000): string {
   if (!markdown) return '';
   const lines = markdown.split('\n');
-  const idx = lines.findIndex(l => /^\s*#{1,6}\s*Grammaire\b/i.test(l) || /^\s*GRAMMAIRE\s*$/i.test(l.trim()));
-  if (idx < 0) return '';
-  // 到下一个标题（且与起始标题相隔至少几行）为止
-  let end = -1;
-  for (let i = idx + 1; i < lines.length; i += 1) {
-    if (/^\s*#{1,6}\s+\S/.test(lines[i]) && i - idx > 3) {
-      end = i;
-      break;
+  const markers: number[] = [];
+  lines.forEach((l, i) => {
+    if (isGrammarMarker(l)) markers.push(i);
+  });
+  if (markers.length === 0) return '';
+
+  const sections: string[] = [];
+  const consumed = new Set<number>();
+  for (const start of markers) {
+    if (consumed.has(start)) continue;
+    let end = -1;
+    for (let i = start + 1; i < lines.length; i += 1) {
+      // 下一个 Grammaire 小节起点
+      if (isGrammarMarker(lines[i])) {
+        end = i;
+        break;
+      }
+      // 明确的非语法小节标题（语法主题标题如 # Échanger des opinions 属于语法内容，不停止）
+      const t = lines[i].trim();
+      const heading = t.match(/^#{1,6}\s+(.+)$/i);
+      const headingText = heading ? heading[1] : t;
+      if (/^(Vocabulaire|Lexique|Phonétique|Atelier|Compréhension orale|Compréhension écrite|Production orale|Production écrite|L'essentiel|DELF|Stratégies|Documents|Projet|Objectifs|Évaluation|Phonie)\b/i.test(headingText)) {
+        if (i - start > 3) {
+          end = i;
+          break;
+        }
+      }
+      if (i - start > 300) break;
     }
+    // 本小节内部的碎片标记视为已消费；下一个小节起点（end 处）保留
+    for (const m of markers) {
+      if (m > start && (end < 0 || m < end)) consumed.add(m);
+    }
+    const section = lines.slice(start, end < 0 ? undefined : end).join('\n').trim();
+    if (section) sections.push(section);
   }
-  const section = lines.slice(idx, end < 0 ? undefined : end).join('\n').trim();
-  return section.slice(0, maxChars);
+  const uniq = Array.from(new Set(sections));
+  return uniq.join('\n\n---\n\n').slice(0, maxTotal);
 }
