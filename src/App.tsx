@@ -426,11 +426,6 @@ function App() {
   useDebouncedCloudSync('french-path-progress', pathProgress, !!authUser, setSyncStatus);
 
   useEffect(() => {
-    if (materialPreview && activeBookId) void saveTextbookPreviewFor(activeBookId, materialPreview);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [materialPreview]);
-
-  useEffect(() => {
     window.localStorage.setItem('deepseek-api-url', deepSeekApiUrl);
     window.localStorage.setItem('deepseek-parse-url', deepSeekParseUrl);
     window.localStorage.setItem('deepseek-analyze-url', deepSeekAnalyzeUrl);
@@ -460,7 +455,32 @@ function App() {
         console.warn('从云端下载教材 PDF 失败：', e);
       }
     }
-    const preview = await loadTextbookPreviewFor(id);
+    let preview = await loadTextbookPreviewFor(id);
+    // 自愈：历史上「上传新教材时预览写入旧教材槽位」的竞态可能让预览与本书不匹配。
+    // 若预览文件名与本书不一致，或本书有 PDF 却没有预览，则用本书 PDF 重建解析结果。
+    if (preview && book.name && preview.title && preview.title !== book.name) {
+      console.warn(`教材《${book.name}》的解析结果与文件名不匹配（${preview.title}），重建中…`);
+      preview = null;
+    }
+    if (!preview && pdf) {
+      try {
+        const { fullText, pages } = await extractTextFromPdf(pdf.data);
+        const units = await parsePdfUnits(fullText);
+        const unitsWithPages = mapUnitsToPages(units, pages);
+        const rebuilt = buildMaterialPreview(fullText, book.name);
+        const fullPreview = { ...rebuilt, units: unitsWithPages };
+        await saveTextbookPreviewFor(id, fullPreview);
+        preview = fullPreview;
+        updateLibraryMeta(id, {
+          hasPreview: true,
+          unitCount: fullPreview.units.length,
+          pages: fullPreview.pages,
+          sentenceCount: fullPreview.sentences.length,
+        });
+      } catch (e) {
+        console.warn('重建教材解析结果失败：', e);
+      }
+    }
     const md = await loadTextbookMarkdownFor(id);
 
     setPdfName(pdf?.name ?? book.name);
