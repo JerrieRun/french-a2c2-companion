@@ -1,0 +1,16 @@
+{
+  "name": "法语 A2→C2 学习伴侣",
+  "short_name": "法语伴侣",
+  "description": "法语教材精读、间隔重复背单词、考级全题型练习",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fff5d6",
+  "theme_color": "#ff8966",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

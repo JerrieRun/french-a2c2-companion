@@ -97,6 +97,9 @@ type MaterialsTabProps = {
   onLookupWord: (word: string, context?: string) => Promise<void> | void;
   onCloseWordLookup: () => void;
   onUpdateWordTranslation: (word: string, translation: string) => void;
+  // Markdown 精读：生词高亮 + 双语对照
+  wordBookTexts: string[];
+  onTranslateParagraph: (text: string) => Promise<string>;
   // 教材云端同步状态
   textbookSync: 'off' | 'syncing' | 'synced' | 'error';
   // 大文件自动压缩
@@ -127,6 +130,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
     intensiveResult, intensiveLoading, onCloseIntensive,
     wordLookup, wordLookupLoading, onLookupWord, onCloseWordLookup, onUpdateWordTranslation,
+    wordBookTexts, onTranslateParagraph,
     textbookSync, compressing, compressProgress, compressResult,
   } = props;
   const importMdRef = useRef<HTMLInputElement>(null);
@@ -215,6 +219,8 @@ export function MaterialsTab(props: MaterialsTabProps) {
           onLookupWord={onLookupWord}
           onAddWord={onAddWord}
           onImportMarkdown={onImportMarkdown}
+          wordBookTexts={wordBookTexts}
+          onTranslateParagraph={onTranslateParagraph}
         />
       ) : mdStatus === 'generating' ? (
         <div className="rounded-[28px] border border-slate-200 bg-white/90 p-8 shadow-sm">

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { extractMarkdownRange, splitMarkdownPages } from '../lib/pdfToMarkdown';
@@ -15,6 +16,36 @@ type MarkdownReaderProps = {
   onLookupWord: (word: string, context?: string) => Promise<void> | void;
   onAddWord: (text: string) => void;
   onImportMarkdown: (text: string, name?: string) => Promise<void>;
+  /** 生词高亮：生词本词列表 */
+  wordBookTexts: string[];
+  /** 双语对照：翻译一段文字 */
+  onTranslateParagraph: (text: string) => Promise<string>;
+};
+
+/** 提取 React children 的纯文本（用于段落翻译） */
+const extractPlainText = (children: any): string => {
+  if (typeof children === 'string' || typeof children === 'number') return String(children);
+  if (Array.isArray(children)) return children.map(extractPlainText).join('');
+  if (children && typeof children === 'object' && children.props) return extractPlainText(children.props.children);
+  return '';
+};
+
+/** 把段落文本中属于生词本的词高亮 */
+const highlightText = (text: string, set: Set<string>): ReactNode[] => {
+  if (!set.size) return [text];
+  const parts = text.split(/([a-zA-Zàâäéèêëîïôöùûüçœæ'’\-]+)/g);
+  return parts.map((part, i) => {
+    if (i % 2 === 1 && set.has(part.toLowerCase())) {
+      return <mark key={i} className="rounded bg-yellow-200/80 px-0.5 text-inherit">{part}</mark>;
+    }
+    return part;
+  });
+};
+
+const highlightChildren = (children: any, set: Set<string>): ReactNode => {
+  if (typeof children === 'string') return highlightText(children, set);
+  if (Array.isArray(children)) return children.map((c, i) => (typeof c === 'string' ? highlightText(c, set) : c));
+  return children;
 };
 
 /** 从 localStorage 读取阅读偏好 */
@@ -28,7 +59,7 @@ const readPref = (key: string, fallback: number | string) => {
   }
 };
 
-const markdownComponents = {
+const baseMarkdownComponents = {
   h1: (props: any) => <h1 className="mb-3 mt-8 text-[1.9em] font-bold leading-snug text-slate-900" {...props} />,
   h2: (props: any) => <h2 className="mb-3 mt-7 text-[1.55em] font-bold leading-snug text-slate-900" {...props} />,
   h3: (props: any) => <h3 className="mb-2 mt-6 text-[1.25em] font-semibold leading-snug text-slate-900" {...props} />,
@@ -76,6 +107,8 @@ export function MarkdownReader(props: MarkdownReaderProps) {
     onLookupWord,
     onAddWord,
     onImportMarkdown,
+    wordBookTexts,
+    onTranslateParagraph,
   } = props;
 
   const [fontScale, setFontScale] = useState<number>(() => readPref('french-reader-font-scale', 1) as number);
@@ -84,6 +117,60 @@ export function MarkdownReader(props: MarkdownReaderProps) {
   const [selection, setSelection] = useState<Selection | null>(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [bilingualOn, setBilingualOn] = useState(false);
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [translatingKey, setTranslatingKey] = useState<string | null>(null);
+
+  const wordBookSet = useMemo(() => new Set(wordBookTexts.map(t => t.toLowerCase())), [wordBookTexts]);
+
+  const translatePara = async (text: string) => {
+    if (translations[text]) return;
+    setTranslatingKey(text);
+    try {
+      const t = await onTranslateParagraph(text);
+      setTranslations(prev => ({ ...prev, [text]: t }));
+    } finally {
+      setTranslatingKey(null);
+    }
+  };
+
+  // 生词高亮 + 双语对照（段落级）
+  const markdownComponents = useMemo(() => ({
+    ...baseMarkdownComponents,
+    h1: (props: any) => <h1 className="mb-3 mt-8 text-[1.9em] font-bold leading-snug text-slate-900">{highlightChildren(props.children, wordBookSet)}</h1>,
+    h2: (props: any) => <h2 className="mb-3 mt-7 text-[1.55em] font-bold leading-snug text-slate-900">{highlightChildren(props.children, wordBookSet)}</h2>,
+    h3: (props: any) => <h3 className="mb-2 mt-6 text-[1.25em] font-semibold leading-snug text-slate-900">{highlightChildren(props.children, wordBookSet)}</h3>,
+    h4: (props: any) => <h4 className="mb-2 mt-5 text-[1.1em] font-semibold leading-snug text-slate-800">{highlightChildren(props.children, wordBookSet)}</h4>,
+    h5: (props: any) => <h5 className="mb-2 mt-4 text-[1.05em] font-semibold text-slate-800">{highlightChildren(props.children, wordBookSet)}</h5>,
+    h6: (props: any) => <h6 className="mb-2 mt-4 text-[1em] font-semibold text-slate-800">{highlightChildren(props.children, wordBookSet)}</h6>,
+    p: (props: any) => {
+      const text = extractPlainText(props.children);
+      return (
+        <p className="my-[0.72em] text-justify leading-[inherit] text-slate-800">
+          {highlightChildren(props.children, wordBookSet)}
+          {bilingualOn && text.trim() && (
+            <>
+              {' '}
+              <button
+                type="button"
+                disabled={translatingKey === text}
+                onClick={() => void translatePara(text)}
+                className="ml-1 align-middle rounded-lg bg-sky/20 px-2 py-0.5 text-[11px] font-semibold text-slate-500 hover:bg-sky/40 disabled:opacity-50"
+              >
+                {translations[text] ? '🌐 中译 ✓' : translatingKey === text ? '翻译中…' : '🌐 中译'}
+              </button>
+              {translations[text] && (
+                <span className="mt-1 block rounded-lg bg-sky/10 px-2 py-1 text-sm leading-6 text-slate-600">{translations[text]}</span>
+              )}
+            </>
+          )}
+        </p>
+      );
+    },
+    li: (props: any) => <li className="leading-[inherit]">{highlightChildren(props.children, wordBookSet)}</li>,
+    th: (props: any) => <th className="border-r border-slate-200 bg-slate-100 px-3 py-2 text-left font-semibold last:border-r-0">{highlightChildren(props.children, wordBookSet)}</th>,
+    td: (props: any) => <td className="border-r border-slate-200 px-3 py-2 align-top last:border-r-0">{highlightChildren(props.children, wordBookSet)}</td>,
+  }), [bilingualOn, translations, translatingKey, wordBookSet]);
   const [unitTargetPage, setUnitTargetPage] = useState<number | null>(null);
   const [selectedUnitIndex, setSelectedUnitIndex] = useState<number | null>(null);
 
@@ -297,6 +384,15 @@ export function MarkdownReader(props: MarkdownReaderProps) {
             <option value="normal">标准版宽</option>
             <option value="wide">宽屏</option>
           </select>
+          {/* 双语对照 */}
+          <button
+            type="button"
+            onClick={() => setBilingualOn(b => !b)}
+            className={`rounded-2xl px-3 py-1.5 text-xs font-semibold transition ${bilingualOn ? 'bg-coral text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            title="双语对照：逐段显示中文翻译"
+          >
+            🌐 双语对照
+          </button>
           {/* 单元跳转 */}
           <select
             value={selectedUnitIndex == null ? '' : String(selectedUnitIndex)}

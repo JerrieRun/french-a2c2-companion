@@ -1534,6 +1534,25 @@ function App() {
 
   const handleCloseIntensive = () => setIntensiveResult(null);
 
+  /** 精读「双语对照」：翻译一段法语文本 */
+  const translateParagraphInline = async (text: string): Promise<string> => {
+    const trimmed = text.trim();
+    if (!trimmed) return '';
+    try {
+      if (deepSeekApiKey) {
+        return (await callDeepSeekChat(
+          { apiKey: deepSeekApiKey, officialUrl: deepSeekOfficialUrl, model: deepSeekModel },
+          '你是一位法语翻译助手。请把用户输入的法语内容翻译成准确自然的中文；若输入是中文则翻译成法语。只输出译文，不要额外解释。',
+          trimmed,
+          1024
+        )).trim();
+      }
+      return `（本地逐词翻译）${translateSentence(trimmed)}`;
+    } catch {
+      return `（本地逐词翻译）${translateSentence(trimmed)}`;
+    }
+  };
+
   /** 点击查词：简洁释义（贴合文义置顶）+ 常用搭配 + 动词变位 */
   const lookupWord = async (word: string, context?: string) => {
     const trimmed = word.trim().replace(/[.,;:!?«»""'']+$/g, '');
@@ -2106,6 +2125,8 @@ function App() {
       onLookupWord={ lookupWord }
       onCloseWordLookup={ handleCloseWordLookup }
       onUpdateWordTranslation={ handleUpdateWordTranslation }
+      wordBookTexts={ wordBook.map(w => w.text) }
+      onTranslateParagraph={ translateParagraphInline }
       textbookSync={ textbookSync }
       compressing={ compressing }
       compressProgress={ compressProgress }
