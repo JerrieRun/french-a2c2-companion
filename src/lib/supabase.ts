@@ -19,6 +19,7 @@ export const supabaseConfigured = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 export const SYNC_KEYS = [
   'french-word-book',
   'french-flashcard-mastery',
+  'french-flashcard-srs',
   'french-analysis-history',
   'french-path-progress',
   'french-preview',

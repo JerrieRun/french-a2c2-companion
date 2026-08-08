@@ -9,7 +9,9 @@ import { clearPdfFile, clearPreview, loadPdfFile, loadPreview, savePdfFile, save
 import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import { compressPdf } from './lib/pdfCompress';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
-import type { AnalysisRecord, AnalysisResult, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate, WordLookupResult } from './types';
+import type { AnalysisRecord, AnalysisResult, FlashcardSrs, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, UnitSection, WordCandidate, WordLookupResult } from './types';
+import { createSrs, gradeSrs } from './lib/srs';
+import type { SrsGrade } from './lib/srs';
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
 import { AuthModal } from './components/AuthModal';
@@ -17,6 +19,29 @@ import { downloadTextbookMarkdown, downloadTextbookMeta, downloadTextbookPdf, fe
 import type { SupabaseUser, SyncKey } from './lib/supabase';
 
 /** 无 DeepSeek Key 时的离线语法练习兜底 */
+/** 解析 CSV 行（支持双引号包裹与转义） */
+function parseCsvLine(line: string): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let inQ = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (inQ) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i += 1; }
+        else inQ = false;
+      } else cur += ch;
+    } else if (ch === '"') {
+      inQ = true;
+    } else if (ch === ',' || ch === '\t') {
+      cells.push(cur);
+      cur = '';
+    } else cur += ch;
+  }
+  cells.push(cur);
+  return cells;
+}
+
 const STATIC_GRAMMAR: Record<string, GrammarExercise[]> = {
   A2: [
     { question: 'Hier, je ___ (manger) une pizza.（用复合过去时填空）', answer: "j'ai mangé" },
@@ -80,6 +105,8 @@ function App() {
   const [candidateWords, setCandidateWords] = useState<WordCandidate[]>([]);
   const [wordBook, setWordBook] = useState<WordCandidate[]>([]);
   const [flashcardMastery, setFlashcardMastery] = useState<Record<string, number>>({});
+  // 闪卡间隔重复（SM-2）
+  const [flashcardSrs, setFlashcardSrs] = useState<Record<string, FlashcardSrs>>({});
   const [writingResult, setWritingResult] = useState<string | null>(null);
   const [writingPrompt, setWritingPrompt] = useState<string | null>(null);
   const [writingLoading, setWritingLoading] = useState(false);
@@ -167,6 +194,14 @@ function App() {
         console.warn('加载闪卡熟练度失败：', error);
       }
     }
+    const savedSrs = window.localStorage.getItem('french-flashcard-srs');
+    if (savedSrs) {
+      try {
+        setFlashcardSrs(JSON.parse(savedSrs));
+      } catch (error) {
+        console.warn('加载闪卡间隔重复数据失败：', error);
+      }
+    }
     if (savedWordBook) {
       try {
         setWordBook(JSON.parse(savedWordBook));
@@ -229,6 +264,9 @@ function App() {
               break;
             case 'french-flashcard-mastery':
               setFlashcardMastery(value as Record<string, number>);
+              break;
+            case 'french-flashcard-srs':
+              setFlashcardSrs(value as Record<string, FlashcardSrs>);
               break;
             case 'french-analysis-history':
               setAnalysisHistory(value as AnalysisRecord[]);
@@ -357,6 +395,16 @@ function App() {
     if (!authUser) return;
     setSyncStatus('syncing');
     const t = setTimeout(() => {
+      void pushUserData('french-flashcard-srs', flashcardSrs)
+        .then(() => setSyncStatus('synced'))
+        .catch(() => setSyncStatus('error'));
+    }, 800);
+    return () => clearTimeout(t);
+  }, [flashcardSrs, authUser]);
+  useEffect(() => {
+    if (!authUser) return;
+    setSyncStatus('syncing');
+    const t = setTimeout(() => {
       void pushUserData('french-analysis-history', analysisHistory)
         .then(() => setSyncStatus('synced'))
         .catch(() => setSyncStatus('error'));
@@ -394,6 +442,9 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem('french-flashcard-mastery', JSON.stringify(flashcardMastery));
   }, [flashcardMastery]);
+  useEffect(() => {
+    window.localStorage.setItem('french-flashcard-srs', JSON.stringify(flashcardSrs));
+  }, [flashcardSrs]);
 
   useEffect(() => {
     window.localStorage.setItem('french-analysis-history', JSON.stringify(analysisHistory));
@@ -1627,6 +1678,63 @@ function App() {
     });
   };
 
+  /** 闪卡间隔重复：SM-2 更新 + 同步旧熟练度（兼容旧数据） */
+  const handleSrsReview = (word: string, grade: SrsGrade) => {
+    const w = wordBook.find(x => x.text === word);
+    setFlashcardSrs(prev => {
+      const cur = prev[word] ?? createSrs(word, w?.translation ?? '待补充', w?.cefr ?? 'B2');
+      const next = gradeSrs(cur, grade);
+      setFlashcardMastery(m => ({ ...m, [word]: next.mastery }));
+      return { ...prev, [word]: next };
+    });
+  };
+
+  /** 导出生词本（CSV） */
+  const handleExportWordBook = () => {
+    if (!wordBook.length) return;
+    const rows = [['word', 'translation', 'cefr', 'frequency'],
+      ...wordBook.map(w => [w.text, w.translation, w.cefr, String(w.frequency)])];
+    const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = '生词本.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  /** 导入生词本（CSV/文本），按词去重合并 */
+  const handleImportWordBook = (text: string, _fileName: string) => {
+    const items: WordCandidate[] = [];
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    for (const line of lines) {
+      const cells = parseCsvLine(line);
+      const word = (cells[0] || '').trim();
+      if (!word) continue;
+      if (['word', '单词', 'text', '法语'].includes(word.toLowerCase())) continue; // 表头
+      const cefrRaw = (cells[2] || '').trim().toUpperCase();
+      items.push({
+        text: word,
+        translation: (cells[1] || '').trim() || '待补充',
+        cefr: (['A2', 'B1', 'B2', 'C1', 'C2'].includes(cefrRaw) ? cefrRaw : 'B2') as WordCandidate['cefr'],
+        frequency: parseInt(cells[3] || '1', 10) || 1,
+      });
+    }
+    if (!items.length) return;
+    setWordBook(prev => {
+      const seen = new Set(prev.map(w => w.text.toLowerCase()));
+      const merged = [...prev];
+      for (const it of items) {
+        if (!seen.has(it.text.toLowerCase())) {
+          seen.add(it.text.toLowerCase());
+          merged.push(it);
+        }
+      }
+      return merged;
+    });
+  };
+
   const handleDeleteHistory = (index: number) => {
     setAnalysisHistory(prev => prev.filter((_, idx) => idx !== index));
     if (expandedHistoryIndex === index) {
@@ -1811,8 +1919,10 @@ function App() {
 {activeTab === 'learn' && (
     <LearnTab
       wordBook={wordBook}
-      flashcardMastery={flashcardMastery}
-      onFlashcardMasteryChange={handleFlashcardMasteryChange}
+      flashcardSrs={flashcardSrs}
+      onSrsReview={handleSrsReview}
+      onExportWordBook={handleExportWordBook}
+      onImportWordBook={handleImportWordBook}
       writingLoading={writingLoading}
       writingResult={writingResult}
       writingPrompt={writingPrompt}

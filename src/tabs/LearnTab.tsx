@@ -1,13 +1,16 @@
-import { FlashcardDeck } from '../components/FlashcardDeck';
+import { SrsFlashcardDeck } from '../components/SrsFlashcardDeck';
 import { GrammarPractice } from '../components/GrammarPractice';
 import { ListeningPractice } from '../components/ListeningPractice';
 import { WritingPractice } from '../components/WritingPractice';
-import type { GrammarExercise, WordCandidate } from '../types';
+import type { SrsGrade } from '../lib/srs';
+import type { FlashcardSrs, GrammarExercise, WordCandidate } from '../types';
 
 type LearnTabProps = {
   wordBook: WordCandidate[];
-  flashcardMastery: Record<string, number>;
-  onFlashcardMasteryChange: (word: string, delta: number) => void;
+  flashcardSrs: Record<string, FlashcardSrs>;
+  onSrsReview: (word: string, grade: SrsGrade) => void;
+  onExportWordBook: () => void;
+  onImportWordBook: (text: string, fileName: string) => void;
   writingLoading: boolean;
   writingResult: string | null;
   writingPrompt?: string | null;
@@ -19,8 +22,10 @@ type LearnTabProps = {
 
 export function LearnTab({
   wordBook,
-  flashcardMastery,
-  onFlashcardMasteryChange,
+  flashcardSrs,
+  onSrsReview,
+  onExportWordBook,
+  onImportWordBook,
   writingLoading,
   writingResult,
   writingPrompt,
@@ -31,7 +36,13 @@ export function LearnTab({
 }: LearnTabProps) {
   return (
     <div className="grid gap-6 md:grid-cols-2">
-      <FlashcardDeck words={wordBook} mastery={flashcardMastery} onMasteryChange={onFlashcardMasteryChange} />
+      <SrsFlashcardDeck
+        words={wordBook}
+        srs={flashcardSrs}
+        onSrsReview={onSrsReview}
+        onExportWordBook={onExportWordBook}
+        onImportWordBook={onImportWordBook}
+      />
       <GrammarPractice loading={grammarLoading} exercises={grammarExercises} onGenerate={onGrammarGenerate} />
       <WritingPractice loading={writingLoading} result={writingResult} onCorrect={onWritingCorrection} initialPrompt={writingPrompt} />
       <ListeningPractice />

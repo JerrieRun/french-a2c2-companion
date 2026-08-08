@@ -173,3 +173,22 @@ export type WordLookupResult = {
   /** 动词变位（按时态） */
   conjugation: { tense: string; forms: string[] }[];
 };
+
+/** 闪卡间隔重复状态（SM-2 风格，兼容原 0-5 熟练度） */
+export type FlashcardSrs = {
+  word: string;
+  translation: string;
+  cefr: string;
+  /** 熟练度 0-5（兼容旧数据/显示） */
+  mastery: number;
+  /** 难度系数，初始 2.5 */
+  ease: number;
+  /** 当前间隔（天） */
+  interval: number;
+  /** 连续答对次数 */
+  reps: number;
+  /** 遗忘次数 */
+  lapses: number;
+  /** 下次复习时间戳（ms）；0 表示从未学过 */
+  due: number;
+};
