@@ -298,48 +298,82 @@ function App() {
     user: SupabaseUser,
     bookId: string,
     files?: { pdf?: ArrayBuffer; md?: string; preview?: MaterialPreview }
-  ) => {
+  ): Promise<{ ok: boolean; hasPdf: boolean; hasMd: boolean; hasPreview: boolean; errors: string[] }> => {
+    setTextbookSync('syncing');
+    setTextbookSyncError(null);
+    const book = loadTextbookLibrary().find(b => b.id === bookId);
+    if (!book) return { ok: false, hasPdf: false, hasMd: false, hasPreview: false, errors: ['教材不存在'] };
+    const flags = { hasPdf: book.hasPdf, hasMd: book.hasMd, hasPreview: book.hasPreview };
+    const errors: string[] = [];
+    if (files?.pdf) {
+      try {
+        await uploadCloudBookFile(user.id, bookId, 'textbook.pdf', files.pdf, 'application/pdf');
+        flags.hasPdf = true;
+      } catch (e) {
+        console.warn('PDF 云端上传失败：', e);
+        flags.hasPdf = false;
+        errors.push(`PDF：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (files?.md) {
+      try {
+        await uploadCloudBookFile(user.id, bookId, 'textbook.md', files.md, 'text/markdown');
+        flags.hasMd = true;
+      } catch (e) {
+        console.warn('Markdown 云端上传失败：', e);
+        errors.push(`Markdown：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (files?.preview) {
+      try {
+        await uploadCloudBookFile(user.id, bookId, 'preview.json', JSON.stringify(files.preview), 'application/json');
+        flags.hasPreview = true;
+      } catch (e) {
+        console.warn('解析结果云端上传失败：', e);
+        errors.push(`解析结果：${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     try {
-      setTextbookSync('syncing');
-      setTextbookSyncError(null);
-      const book = loadTextbookLibrary().find(b => b.id === bookId);
-      if (!book) return;
-      const flags = { hasPdf: book.hasPdf, hasMd: book.hasMd, hasPreview: book.hasPreview };
-      if (files?.pdf) {
-        try {
-          await uploadCloudBookFile(user.id, bookId, 'textbook.pdf', files.pdf, 'application/pdf');
-          flags.hasPdf = true;
-        } catch (e) {
-          console.warn('PDF 云端上传失败（可能超过 50MB 免费上限）：', e);
-          flags.hasPdf = false;
-          setTextbookSyncError(`PDF 未上传云端（${e instanceof Error ? e.message : String(e)}）。教材仍保存在本机，可正常精读。`);
-        }
-      }
-      if (files?.md) {
-        try {
-          await uploadCloudBookFile(user.id, bookId, 'textbook.md', files.md, 'text/markdown');
-          flags.hasMd = true;
-        } catch (e) {
-          console.warn('Markdown 云端上传失败：', e);
-        }
-      }
-      if (files?.preview) {
-        try {
-          await uploadCloudBookFile(user.id, bookId, 'preview.json', JSON.stringify(files.preview), 'application/json');
-          flags.hasPreview = true;
-        } catch (e) {
-          console.warn('解析结果云端上传失败：', e);
-        }
-      }
       await uploadCloudBookFile(user.id, bookId, 'meta.json', JSON.stringify({ name: book.name }), 'application/json');
-      const updated: TextbookMeta = { ...book, ...flags };
-      updateLibraryMeta(bookId, flags);
-      await uploadCloudManifest(user.id, [updated]);
-      setTextbookSync('synced');
     } catch (e) {
-      console.warn('教材上传云端失败：', e);
+      errors.push(`元数据：${e instanceof Error ? e.message : String(e)}`);
+    }
+    updateLibraryMeta(bookId, flags);
+    try {
+      await uploadCloudManifest(user.id, [{ ...book, ...flags }]);
+    } catch (e) {
+      errors.push(`清单：${e instanceof Error ? e.message : String(e)}`);
+    }
+    if (errors.length === 0) {
+      setTextbookSync('synced');
+    } else {
       setTextbookSync('error');
-      setTextbookSyncError(e instanceof Error ? e.message : String(e));
+      setTextbookSyncError(errors.join('；'));
+    }
+    return { ok: errors.length === 0, hasPdf: flags.hasPdf, hasMd: flags.hasMd, hasPreview: flags.hasPreview, errors };
+  };
+
+  /** 把某本教材重新同步到云端（补传缺失的 PDF / Markdown / 解析结果），用于修复云端记录不完整 */
+  const handleResyncBookToCloud = async (bookId: string) => {
+    if (!authUser) {
+      setRestoreNotice('请先登录后再同步教材。');
+      return;
+    }
+    const book = loadTextbookLibrary().find(b => b.id === bookId);
+    const [pdf, md, preview] = await Promise.all([
+      loadTextbookPdf(bookId),
+      loadTextbookMarkdownFor(bookId),
+      loadTextbookPreviewFor(bookId),
+    ]);
+    const result = await uploadBookToCloud(authUser, bookId, {
+      pdf: pdf?.data,
+      md: md ?? undefined,
+      preview: preview ?? undefined,
+    });
+    if (result.ok) {
+      setRestoreNotice(`☁️ 已重新同步《${book?.name ?? '教材'}》到云端（PDF / Markdown / 解析结果），其他设备刷新后可打开。`);
+    } else {
+      setRestoreNotice(`⚠️ 重新同步未完全成功：${result.errors.join('；')}。可查看下方错误详情。`);
     }
   };
 
@@ -540,7 +574,7 @@ function App() {
 
     // 既无 PDF 也无 Markdown → 明确提示，避免“点了没反应”
     if (!pdf && !md && !preview) {
-      setError('这本书的云端记录不完整（PDF / Markdown 都还没同步到云端），暂时无法打开精读。请回到上传它的设备，确认同步成功后重试。');
+      setError('这本书的云端记录不完整（PDF / Markdown 都没同步到云端）。请回到上传它的设备，在「教材中心 → 教材库」点该书的「☁️ 重新同步」，成功后再来这里重试。');
     }
     setOpeningBookId(null);
   };
@@ -2134,6 +2168,8 @@ function App() {
       activeBookId={ activeBookId }
       onOpenBook={ openBook }
       openingBookId={ openingBookId }
+      onResyncBook={ handleResyncBookToCloud }
+      loggedIn={ !!authUser }
       onDeleteBook={ handleDeleteBook }
       textbookSyncError={ textbookSyncError }
       onRetryCloudSync={ () => { if (authUser) void syncTextbooksFromCloud(authUser); } }

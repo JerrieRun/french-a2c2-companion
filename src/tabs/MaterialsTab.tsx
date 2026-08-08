@@ -17,6 +17,8 @@ type MaterialsTabProps = {
   activeBookId: string | null;
   onOpenBook: (id: string) => Promise<void>;
   openingBookId: string | null;
+  onResyncBook: (id: string) => Promise<void>;
+  loggedIn: boolean;
   onDeleteBook: (id: string) => Promise<void>;
   textbookSyncError: string | null;
   onRetryCloudSync: () => void;
@@ -116,7 +118,7 @@ type MaterialsTabProps = {
 
 export function MaterialsTab(props: MaterialsTabProps) {
   const {
-    pdfName, textbookLibrary, activeBookId, onOpenBook, openingBookId, onDeleteBook, textbookSyncError, onRetryCloudSync,
+    pdfName, textbookLibrary, activeBookId, onOpenBook, openingBookId, onResyncBook, loggedIn, onDeleteBook, textbookSyncError, onRetryCloudSync,
     error, loading, parseMethod, parseMode, setParseMode,
     materialPreview, selectedUnit, selectedUnitIndex,
     sentenceCount, selectedSentence,
@@ -216,6 +218,16 @@ export function MaterialsTab(props: MaterialsTabProps) {
                   打开
                 </button>
               ) : null}
+              {loggedIn && (
+                <button
+                  type="button"
+                  onClick={() => void onResyncBook(book.id)}
+                  title="把本书的 PDF / Markdown / 解析结果重新上传到云端（修复其他设备打不开）"
+                  className="rounded-xl bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm ring-1 ring-slate-200 hover:bg-sky/10 hover:text-sky-700"
+                >
+                  ☁️ 重新同步
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { if (window.confirm(`确定删除教材《${book.name}》？本地与云端记录都会移除。`)) void onDeleteBook(book.id); }}
