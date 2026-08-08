@@ -236,3 +236,132 @@ export async function pushUserData(key: SyncKey, value: unknown): Promise<void> 
   });
   if (!res.ok) throw new Error(`同步失败（${res.status}）`);
 }
+
+/* ---------- 教材存储（Supabase Storage，跨设备恢复） ---------- */
+
+const TEXTBOOK_BUCKET = 'textbooks';
+const textbookPath = (uid: string, file: string) => `user/${uid}/${file}`;
+
+function storageHeaders(): Record<string, string> {
+  const session = getStoredSession();
+  return {
+    Authorization: `Bearer ${session?.access_token ?? ''}`,
+    apikey: SUPABASE_ANON_KEY,
+  };
+}
+
+/** 检查当前用户云端是否已有教材文件 */
+export async function hasTextbook(uid: string): Promise<{ pdf: boolean; md: boolean }> {
+  const res = await requestJson(`/storage/v1/object/list/${TEXTBOOK_BUCKET}`, {
+    method: 'POST',
+    headers: { ...storageHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prefix: `user/${uid}/`, limit: 100 }),
+  });
+  if (!res.ok) return { pdf: false, md: false };
+  const rows = (await res.json()) as Array<{ name: string }>;
+  const names = new Set(rows.map(r => r.name));
+  return {
+    pdf: names.has(textbookPath(uid, 'textbook.pdf')),
+    md: names.has(textbookPath(uid, 'textbook.md')),
+  };
+}
+
+/** 上传教材 PDF（二进制）到当前用户目录；x-upsert 支持覆盖 */
+export async function uploadTextbookPdf(uid: string, data: ArrayBuffer, fileName: string): Promise<void> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.pdf')}`, {
+    method: 'POST',
+    headers: {
+      ...storageHeaders(),
+      'Content-Type': 'application/pdf',
+      'x-upsert': 'true',
+      'x-file-name': encodeURIComponent(fileName),
+    },
+    body: data,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`教材上传失败（${res.status}）${text.slice(0, 120)}`);
+  }
+}
+
+/** 上传教材 Markdown（精读文本） */
+export async function uploadTextbookMarkdown(uid: string, markdown: string): Promise<void> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.md')}`, {
+    method: 'POST',
+    headers: {
+      ...storageHeaders(),
+      'Content-Type': 'text/markdown',
+      'x-upsert': 'true',
+    },
+    body: markdown,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`教材 Markdown 上传失败（${res.status}）${text.slice(0, 120)}`);
+  }
+}
+
+/** 下载云端教材 PDF；不存在返回 null */
+export async function downloadTextbookPdf(uid: string): Promise<{ data: ArrayBuffer; fileName: string } | null> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.pdf')}`, {
+    headers: storageHeaders(),
+  });
+  if (res.status === 404 || res.status === 400) return null;
+  if (!res.ok) throw new Error(`教材下载失败（${res.status}）`);
+  const encoded = res.headers.get('x-file-name') || '';
+  let fileName = 'textbook.pdf';
+  try {
+    fileName = encoded ? decodeURIComponent(encoded) : fileName;
+  } catch {
+    /* ignore */
+  }
+  return { data: await res.arrayBuffer(), fileName };
+}
+
+/** 下载云端教材 Markdown；不存在返回 null */
+export async function downloadTextbookMarkdown(uid: string): Promise<string | null> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'textbook.md')}`, {
+    headers: storageHeaders(),
+  });
+  if (res.status === 404 || res.status === 400) return null;
+  if (!res.ok) throw new Error(`教材 Markdown 下载失败（${res.status}）`);
+  return await res.text();
+}
+
+/** 上传教材原始文件名（meta.json），跨设备恢复时保留原名 */
+export async function uploadTextbookMeta(uid: string, name: string): Promise<void> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'meta.json')}`, {
+    method: 'POST',
+    headers: { ...storageHeaders(), 'Content-Type': 'application/json', 'x-upsert': 'true' },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) throw new Error(`教材元数据上传失败（${res.status}）`);
+}
+
+/** 读取教材原始文件名；没有则返回 null */
+export async function downloadTextbookMeta(uid: string): Promise<string | null> {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${textbookPath(uid, 'meta.json')}`, {
+    headers: storageHeaders(),
+  });
+  if (res.status === 404 || res.status === 400) return null;
+  if (!res.ok) return null;
+  try {
+    const data = (await res.json()) as { name?: string };
+    return data.name || null;
+  } catch {
+    return null;
+  }
+}
+
+/** 删除当前用户的云端教材（PDF + Markdown） */
+export async function deleteTextbook(uid: string): Promise<void> {
+  const paths = [textbookPath(uid, 'textbook.pdf'), textbookPath(uid, 'textbook.md')];
+  await Promise.all(
+    paths.map(path =>
+      fetch(`${SUPABASE_URL}/storage/v1/object/${TEXTBOOK_BUCKET}/${path}`, {
+        method: 'DELETE',
+        headers: storageHeaders(),
+      })
+    )
+  );
+}

@@ -96,6 +96,8 @@ type MaterialsTabProps = {
   wordLookupLoading: boolean;
   onLookupWord: (word: string, context?: string) => Promise<void> | void;
   onCloseWordLookup: () => void;
+  // 教材云端同步状态
+  textbookSync: 'off' | 'syncing' | 'synced' | 'error';
 };
 
 export function MaterialsTab(props: MaterialsTabProps) {
@@ -120,6 +122,7 @@ export function MaterialsTab(props: MaterialsTabProps) {
     onGenerateMarkdown, onImportMarkdown, onJumpToPdfPage,
     intensiveResult, intensiveLoading, onCloseIntensive,
     wordLookup, wordLookupLoading, onLookupWord, onCloseWordLookup,
+    textbookSync,
   } = props;
   const importMdRef = useRef<HTMLInputElement>(null);
 
@@ -430,6 +433,17 @@ export function MaterialsTab(props: MaterialsTabProps) {
         </label>
       </div>
       {pdfName && <div className="mt-4 rounded-3xl bg-lavender/20 p-4 text-sm text-slate-700">已选择：<strong>{pdfName}</strong></div>}
+      {textbookSync !== 'off' && (
+        <div className={`mt-2 flex items-center gap-2 rounded-2xl px-3 py-2 text-xs font-semibold ${
+          textbookSync === 'synced' ? 'bg-emerald-50 text-emerald-700'
+            : textbookSync === 'syncing' ? 'bg-sky/10 text-slate-600'
+            : 'bg-rose-50 text-rose-600'
+        }`}>
+          {textbookSync === 'synced' && '☁️ 教材已同步到云端（可跨设备恢复）'}
+          {textbookSync === 'syncing' && '☁️ 教材同步中 / 从云端恢复中…'}
+          {textbookSync === 'error' && '⚠️ 教材云端同步失败（可在 Supabase 后台确认 Storage 设置）'}
+        </div>
+      )}
       {restoreNotice && (
         <div className="mt-4 flex items-start justify-between gap-3 rounded-3xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
           <span>{restoreNotice}</span>

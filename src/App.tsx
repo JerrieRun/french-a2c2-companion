@@ -12,7 +12,7 @@ import type { AnalysisRecord, AnalysisResult, GrammarExercise, IntensiveAnalysis
 import { LearnTab } from './tabs/LearnTab';
 import { PathTab } from './tabs/PathTab';
 import { AuthModal } from './components/AuthModal';
-import { fetchAllUserData, getCurrentUser, pushUserData, signInWithEmail, signOut, signUpWithEmail, supabaseConfigured, SYNC_KEYS } from './lib/supabase';
+import { downloadTextbookMarkdown, downloadTextbookMeta, downloadTextbookPdf, fetchAllUserData, getCurrentUser, hasTextbook, pushUserData, signInWithEmail, signOut, signUpWithEmail, supabaseConfigured, SYNC_KEYS, uploadTextbookMarkdown, uploadTextbookMeta, uploadTextbookPdf } from './lib/supabase';
 import type { SupabaseUser, SyncKey } from './lib/supabase';
 
 /** 无 DeepSeek Key 时的离线语法练习兜底 */
@@ -127,6 +127,8 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
   const [syncStatus, setSyncStatus] = useState<'off' | 'syncing' | 'synced' | 'error'>('off');
+  // 教材云端同步状态（PDF + Markdown 上传 Supabase Storage）
+  const [textbookSync, setTextbookSync] = useState<'off' | 'syncing' | 'synced' | 'error'>('off');
   const [pathProgress, setPathProgress] = useState<PathProgress>(() => {
     try {
       return JSON.parse(window.localStorage.getItem('french-path-progress') || '{}') as PathProgress;
@@ -191,7 +193,10 @@ function App() {
         const user = await getCurrentUser();
         if (cancelled) return;
         setAuthUser(user);
-        if (user) await applyCloudToLocal();
+        if (user) {
+          await applyCloudToLocal();
+          void restoreTextbookFromCloud(user);
+        }
       } catch (e) {
         console.warn('恢复登录状态失败：', e);
       } finally {
@@ -248,6 +253,50 @@ function App() {
     }
   };
 
+  /** 把本地教材上传到当前用户云端（PDF + 原始文件名） */
+  const uploadTextbookToCloud = async (user: SupabaseUser, pdf: ArrayBuffer, fileName: string) => {
+    try {
+      setTextbookSync('syncing');
+      await uploadTextbookPdf(user.id, pdf, fileName);
+      try { await uploadTextbookMeta(user.id, fileName); } catch { /* 元数据失败不影响主文件 */ }
+      setTextbookSync('synced');
+    } catch (e) {
+      console.warn('教材上传云端失败：', e);
+      setTextbookSync('error');
+    }
+  };
+
+  /** 把精读 Markdown 上传到云端（供跨设备直接精读，无需重新转换） */
+  const uploadMarkdownToCloud = async (user: SupabaseUser, markdown: string) => {
+    try {
+      await uploadTextbookMarkdown(user.id, markdown);
+    } catch (e) {
+      console.warn('Markdown 上传云端失败：', e);
+    }
+  };
+
+  /** 登录后尝试从云端恢复教材（本地已有则跳过） */
+  const restoreTextbookFromCloud = async (user: SupabaseUser) => {
+    try {
+      const has = await hasTextbook(user.id);
+      if (!has.pdf) return;
+      const saved = await loadPdfFile();
+      if (saved) return; // 本机已有教材，以本地为准
+      setTextbookSync('syncing');
+      const pdf = await downloadTextbookPdf(user.id);
+      if (!pdf) return;
+      const metaName = await downloadTextbookMeta(user.id);
+      await savePdfFile(metaName || pdf.fileName, pdf.data);
+      const md = await downloadTextbookMarkdown(user.id);
+      if (md) await saveTextbookMarkdown(md);
+      await restoreSavedMaterial();
+      setTextbookSync('synced');
+    } catch (e) {
+      console.warn('从云端恢复教材失败：', e);
+      setTextbookSync('error');
+    }
+  };
+
   /** 登录 / 注册提交 */
   const handleAuthSubmit = async (email: string, password: string, mode: 'login' | 'signup') => {
     setAuthSubmitting(true);
@@ -257,6 +306,7 @@ function App() {
       setAuthUser(user);
       setAuthModalOpen(false);
       await applyCloudToLocal();
+      void restoreTextbookFromCloud(user);
     } catch (e) {
       setAuthError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -269,6 +319,7 @@ function App() {
     await signOut();
     setAuthUser(null);
     setSyncStatus('off');
+    setTextbookSync('off');
   };
 
   /** 路径进度持久化到本地 */
@@ -403,6 +454,7 @@ function App() {
       } catch (e) {
         console.warn('缓存 Markdown 失败：', e);
       }
+      if (authUser && md) void uploadMarkdownToCloud(authUser, md);
     } catch (e) {
       console.error('Markdown 生成失败：', e);
       setMdStatus('error');
@@ -484,6 +536,8 @@ function App() {
         // 保存到本地：PDF 入 IndexedDB、解析结果入 localStorage，之后无需重新上传
         await savePdfFile(file.name, pdfStorageCopy);
         savePreview(fullPreview);
+        // 已登录时把教材同步到云端（跨设备恢复）
+        if (authUser) void uploadTextbookToCloud(authUser, pdfStorageCopy, file.name);
         setRestoreNotice(`✅ 教材《${file.name}》已保存在本项目中，下次打开自动恢复，无需重新上传。`);
       } catch (saveErr) {
         console.warn('保存教材到本地失败：', saveErr);
@@ -1820,6 +1874,7 @@ function App() {
       wordLookupLoading={ wordLookupLoading }
       onLookupWord={ lookupWord }
       onCloseWordLookup={ handleCloseWordLookup }
+      textbookSync={ textbookSync }
       handleGeneratePractice={ handleGeneratePractice }
       testDeepSeekConnection={ testDeepSeekConnection }
       translateSentence={ translateSentence }
