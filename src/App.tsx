@@ -1157,19 +1157,56 @@ function App() {
   };
 
   /** 课程路径：课时「核心词汇」→ 把单元词汇并入生词本（去重），返回新增数量 */
+  /** 把单元学习卡「分类词汇」+ 提取核心词合并加入生词本（去重），返回新增数量 */
   const handleAddUnitWordsFromPath = (unitIndex: number): number => {
     const unit = materialPreview?.units[unitIndex];
-    if (!unit?.vocabulary?.length) return 0;
-    const existing = new Set(wordBook.map(w => w.text));
-    const fresh = unit.vocabulary.filter(w => w.text && !existing.has(w.text));
+    if (!unit) return 0;
+    const items: { text: string; translation: string; cefr: WordCandidate['cefr'] }[] = [];
+    const seen = new Set<string>();
+    for (const g of unit.vocabGroups ?? []) {
+      for (const it of g.items) {
+        const t = (it.word || '').trim();
+        if (!t) continue;
+        const key = t.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push({ text: t, translation: (it.translation || '').trim() || '待补充', cefr: getCeFrTag(t) });
+      }
+    }
+    for (const v of unit.vocabulary ?? []) {
+      const t = (v.text || '').trim();
+      if (!t) continue;
+      const key = t.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      items.push({ text: t, translation: (v.translation || '').trim() || '待补充', cefr: v.cefr });
+    }
+    const prevSet = new Set(wordBook.map(w => w.text.toLowerCase()));
+    const fresh = items.filter(it => !prevSet.has(it.text.toLowerCase()));
     if (fresh.length) {
       setWordBook(prev => {
-        const prevSet = new Set(prev.map(w => w.text));
-        const toAdd = fresh.filter(w => !prevSet.has(w.text));
+        const ps = new Set(prev.map(w => w.text.toLowerCase()));
+        const toAdd = fresh.filter(it => !ps.has(it.text.toLowerCase())).map(it => ({ ...it, frequency: 1 }));
         return [...prev, ...toAdd];
       });
     }
     return fresh.length;
+  };
+
+  /** 单个词加入生词本（去重） */
+  const handleAddWordbookItem = (text: string, translation: string, cefr?: string) => {
+    const t = (text || '').trim();
+    if (!t) return;
+    setWordBook(prev => {
+      if (prev.some(w => w.text.toLowerCase() === t.toLowerCase())) return prev;
+      const cefrValid = ['A2', 'B1', 'B2', 'C1', 'C2'].includes(cefr ?? '');
+      return [...prev, {
+        text: t,
+        translation: (translation || '').trim() || translateWord(t) || '待补充',
+        cefr: (cefrValid ? cefr! : getCeFrTag(t)) as WordCandidate['cefr'],
+        frequency: 1,
+      }];
+    });
   };
 
   /** 课程路径：课时「句型精析」→ 切到教材中心并分析该单元第一个核心句子 */
@@ -1952,6 +1989,8 @@ function App() {
       hasApiKey={!!deepSeekApiKey}
       onOpenUnitInPdf={handleOpenUnitFromPath}
       onAddUnitWords={handleAddUnitWordsFromPath}
+      wordBook={wordBook}
+      onAddWordbookItem={handleAddWordbookItem}
       onGoMaterials={() => setActiveTab('materials')}
       onGoLearn={() => setActiveTab('learn')}
       onGenerateUnitModule={generateUnitModule}

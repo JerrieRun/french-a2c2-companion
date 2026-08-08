@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import type { AnalysisResult, MaterialPreview, PathProgress } from '../types';
+import type { AnalysisResult, MaterialPreview, PathProgress, WordCandidate } from '../types';
 import { UnitStudyModule } from '../components/UnitStudyModule';
 import { ModuleDetailPage } from '../components/ModuleDetailPage';
 import { LESSONS } from '../lib/lessons';
@@ -13,6 +13,8 @@ type PathTabProps = {
   hasApiKey: boolean;
   onOpenUnitInPdf: (unitIndex: number) => void;
   onAddUnitWords: (unitIndex: number) => number;
+  wordBook: WordCandidate[];
+  onAddWordbookItem: (text: string, translation: string, cefr?: string) => void;
   onGoMaterials: () => void;
   onGoLearn: () => void;
   onGenerateUnitModule: (unitIndex: number) => Promise<void>;
@@ -35,6 +37,8 @@ export function PathTab({
   hasApiKey,
   onOpenUnitInPdf,
   onAddUnitWords,
+  wordBook,
+  onAddWordbookItem,
   onGoMaterials,
   onGoLearn,
   onGenerateUnitModule,
@@ -265,6 +269,8 @@ export function PathTab({
           onOpenUnitInPdf={onOpenUnitInPdf}
           onGoLearn={onGoLearn}
           onAddUnitWords={onAddUnitWords}
+          wordBook={wordBook}
+          onAddWordbookItem={onAddWordbookItem}
           onGenerateUnitModule={onGenerateUnitModule}
           unitModuleLoading={unitModuleLoading}
           onAnalyzeSentence={onAnalyzeSentence}

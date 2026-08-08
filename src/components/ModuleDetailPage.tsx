@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { AnalysisResult, PathProgress, UnitSection } from '../types';
+import type { AnalysisResult, PathProgress, UnitSection, WordCandidate } from '../types';
 import { LESSONS } from '../lib/lessons';
 import { speakFrench, stopSpeaking } from '../lib/tts';
 import { UnitPracticePage } from './UnitPracticePage';
@@ -17,6 +17,8 @@ type ModuleDetailPageProps = {
   onOpenUnitInPdf: (unitIndex: number) => void;
   onGoLearn: () => void;
   onAddUnitWords: (unitIndex: number) => number;
+  wordBook: WordCandidate[];
+  onAddWordbookItem: (text: string, translation: string, cefr?: string) => void;
   onGenerateUnitModule: (unitIndex: number) => Promise<void>;
   unitModuleLoading: number | null;
   onAnalyzeSentence: (sentence: string) => Promise<AnalysisResult>;
@@ -74,7 +76,7 @@ export function ModuleDetailPage(props: ModuleDetailPageProps) {
   const {
     unit, unitIndex, lessonIndex, level, hasApiKey,
     progress, onToggleProgress, onClose, onGoNext,
-    onOpenUnitInPdf, onGoLearn, onAddUnitWords,
+    onOpenUnitInPdf, onGoLearn, onAddUnitWords, wordBook, onAddWordbookItem,
     onGenerateUnitModule, unitModuleLoading, onAnalyzeSentence,
     onGeneratePractice, practiceLoading,
   } = props;
@@ -191,6 +193,7 @@ export function ModuleDetailPage(props: ModuleDetailPageProps) {
 
       case 'vocab': {
         const groups = unit.vocabGroups ?? [];
+        const inBook = (word: string) => wordBook.some(w => w.text.toLowerCase() === word.toLowerCase());
         return (
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -213,13 +216,26 @@ export function ModuleDetailPage(props: ModuleDetailPageProps) {
                 {groups.map((group, gi) => (
                   <div key={gi} className="rounded-3xl border border-slate-200 bg-cream p-4">
                     <p className="text-sm font-bold text-coral">{group.category}</p>
-                    <ul className="mt-2 space-y-1.5">
+                    <ul className="mt-2 space-y-2">
                       {group.items.map((item, ii) => (
-                        <li key={ii} className="text-sm leading-6 text-slate-700">
-                          <span className="font-semibold text-slate-900">{item.word}</span>
-                          <span className="text-slate-400"> — </span>
-                          <span>{item.translation}</span>
-                          {item.example && <p className="mt-0.5 text-xs italic text-slate-500">例：{item.example}</p>}
+                        <li key={ii} className="flex items-start justify-between gap-2 text-sm leading-6 text-slate-700">
+                          <div className="min-w-0">
+                            <span className="font-semibold text-slate-900">{item.word}</span>
+                            <span className="text-slate-400"> — </span>
+                            <span>{item.translation}</span>
+                            {item.example && <p className="mt-0.5 text-xs italic text-slate-500">例：{item.example}</p>}
+                          </div>
+                          {inBook(item.word) ? (
+                            <span className="mt-0.5 shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">✓ 已收</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onAddWordbookItem(item.word, item.translation)}
+                              className="mt-0.5 shrink-0 rounded-full bg-coral/90 px-2.5 py-0.5 text-[11px] font-semibold text-white hover:bg-coral"
+                            >
+                              ➕ 收藏
+                            </button>
+                          )}
                         </li>
                       ))}
                     </ul>
