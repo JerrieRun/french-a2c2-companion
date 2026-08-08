@@ -88,6 +88,7 @@ function PdfPage({
     <div
       className="relative mx-auto mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
       data-page={pageNumber}
+      style={size ? { width: size.w } : undefined}
     >
       <canvas ref={canvasRef} className={size ? '' : 'invisible'} style={size ? { width: size.w, height: size.h } : undefined} />
       <div
