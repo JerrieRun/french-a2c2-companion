@@ -150,3 +150,32 @@ describe('Édito B2 风格', () => {
     expect(r.units[1].startPage).toBe(4);
   });
 });
+
+describe('Édito B1 风格（目录撞页 + 缺失单元补齐）', () => {
+  it('目录两单元撞同一页时用页内实际单元号裁决，缺失单元按页内标记补齐', () => {
+    // 目录错位：Unité 2 与 Unité 8 都标到 p. 3（后者是提取错位），Unité 8 真实开篇在 p. 5
+    const pages = [
+      'Sommaire\nUnité 1 p. 2 Un premier thème Compréhension orale\nUnité 2 p. 3 Vivre ensemble sur la Terre Compréhension orale\nUnité 3 p. 4 Un troisième thème Compréhension orale\nUnité 8 p. 3 Mieux consommer ! Compréhension orale',
+      '1 Unité Un premier thème Objectifs o Parler.',
+      '2 Unité Vivre ensemble sur la Terre Objectifs o Réagir.',
+      '3 Unité Un troisième thème Objectifs o Lire.',
+      '8 Unité Mieux consommer ! Objectifs o Exprimer.',
+    ];
+    const r = buildLocalUnitsFromText(makeText(pages));
+    const u2 = r.units.find(u => u.title.includes('Vivre ensemble sur la Terre'));
+    const u8 = r.units.find(u => u.title.includes('Mieux consommer'));
+    expect(u2?.startPage).toBe(3);
+    expect(u8?.startPage).toBe(5);
+    expect(r.units.length).toBe(4);
+  });
+
+  it('主题开头带括号不会被剥掉（(Se) mettre en scène）', () => {
+    const pages = [
+      'Sommaire\nUnité 1 p. 1 (Se) mettre en scène Compréhension orale\nUnité 2 p. 2 Un autre thème Compréhension orale',
+      '1 Unité (Se) mettre en scène Objectifs o Jouer.',
+      '2 Unité Un autre thème Objectifs o Lire.',
+    ];
+    const r = buildLocalUnitsFromText(makeText(pages));
+    expect(r.units[0].title).toBe('Unité 1 · (Se) mettre en scène');
+  });
+});

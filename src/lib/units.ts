@@ -16,7 +16,7 @@ import type { MaterialPreview, UnitSection, WordCandidate } from '../types';
 import { extractWordCandidates } from './words';
 
 /** 本地单元解析器版本：解析逻辑升级后递增，用于让旧教材自动重建解析结果 */
-export const LOCAL_PARSE_VERSION = 2;
+export const LOCAL_PARSE_VERSION = 3;
 
 export type LocalParseResult = {
   units: UnitSection[];
@@ -132,8 +132,8 @@ function tocTheme(pageText: string, afterIndex: number, pattern: UnitPattern): s
   const stop = rest.search(THEME_STOP);
   let candidate = stop >= 0 ? rest.slice(0, stop) : rest;
   candidate = candidate.replace(/\s{2,}/g, ' ').trim();
-  // 去掉开头的中缀（如 "Nouvelles vies" 前可能残留小标题）
-  candidate = candidate.replace(/^[^A-Za-zÀ-ÖØ-öø-ÿ0-9]+/, '').trim();
+  // 只去掉开头空白与常见分隔符（保留 "(" 等，避免 "(Se) mettre en scène" 变成 "Se) …"）
+  candidate = candidate.replace(/^[\s.,;:·•\-–—]+/, '').trim();
   return candidate.slice(0, 60);
 }
 
@@ -153,7 +153,7 @@ function openerTheme(pageText: string, pattern: UnitPattern): string {
 function findFirstStart(pages: Array<{ n: number; text: string }>, pattern: UnitPattern, num: number): number {
   const label = escapeRegExp(pattern.label);
   const numStart = new RegExp('^' + label + String.raw`\s*` + num + String.raw`\b`, 'i');
-  const numFirst = new RegExp('^\s*' + num + String.raw`\s+` + label + String.raw`\b`, 'i');
+  const numFirst = new RegExp('^\\s*' + num + String.raw`\s+` + label + '(?![À-ÿ0-9])', 'i');
   for (let i = 0; i < pages.length; i += 1) {
     if (numStart.test(pages[i].text) || numFirst.test(pages[i].text)) return i;
   }
@@ -161,12 +161,40 @@ function findFirstStart(pages: Array<{ n: number; text: string }>, pattern: Unit
 }
 
 /** 页面是否像「单元开篇页」：以 Unité（带/不带数字）或「数字 Unité」开头，或开头 200 字符内含 Objectifs 等开篇标记 */
-function looksLikeOpener(pageText: string, pattern: UnitPattern): boolean {
+export function looksLikeOpener(pageText: string, pattern: UnitPattern): boolean {
   const label = escapeRegExp(pattern.label);
   if (new RegExp('^' + label + String.raw`[\s\d]*`, 'i').test(pageText)) return true; // Unité 1 … / Unité Faites…
-  if (new RegExp('^\s*\d{1,2}\s+' + label + String.raw`\b`, 'i').test(pageText)) return true; // 1 Unité …
+  if (new RegExp('^\\s*\\d{1,2}\\s+' + label + '(?![À-ÿ0-9])', 'i').test(pageText)) return true; // 1 Unité …
   if (/\b(Objectifs|Au programme|Découvrir|Contenus)\b/i.test(pageText.slice(0, 200))) return true;
   return false;
+}
+
+/** 页内是否出现「N Unité」或「Unité N」的单元号标记（用于裁决目录撞页、补齐缺失单元） */
+export function pageContainsUnitNumber(pageText: string, pattern: UnitPattern, num: number): boolean {
+  // 注意：JS 的 \b / \w 只认 ASCII，Unité 结尾的 é 会让 "Unité\b" 失效，
+  // 因此用「前后非字母数字」做边界。
+  const label = escapeRegExp(pattern.label);
+  const before = '(^|[^À-ÿ0-9A-Za-z])';
+  const after = '(?![À-ÿ0-9])';
+  return (
+    new RegExp(before + num + String.raw`\s+` + label + after, 'i').test(pageText) ||
+    new RegExp(before + label + String.raw`\s*` + num + after, 'i').test(pageText)
+  );
+}
+
+/** 全篇查找包含「N Unité / Unité N」的开篇页（跳过目录页），用于补齐目录中被裁掉/缺失的单元 */
+export function findPageWithUnitNumber(pages: Array<{ n: number; text: string }>, pattern: UnitPattern, num: number): number {
+  for (let i = 0; i < pages.length; i += 1) {
+    if (distinctNumbers(pages[i].text, pattern).size >= 2) continue; // 目录/索引页
+    if (!looksLikeOpener(pages[i].text, pattern)) continue;
+    if (pageContainsUnitNumber(pages[i].text, pattern, num)) return i;
+  }
+  // 放宽：任何非目录页且包含该标记
+  for (let i = 0; i < pages.length; i += 1) {
+    if (distinctNumbers(pages[i].text, pattern).size >= 2) continue;
+    if (pageContainsUnitNumber(pages[i].text, pattern, num)) return i;
+  }
+  return -1;
 }
 
 /** 在提示页码附近寻找真正的单元起始页。
@@ -263,8 +291,41 @@ export function buildLocalUnitsFromText(
 
   let unitStarts: Array<{ num: number; pageIndex: number }> = [];
   if (tocMap.size >= 2) {
+    // 目录页码 → 起始页（可能多本教材的目录提取有错位/撞页，如 B1 目录把 "Unité 8" 错标到 p. 25）
+    const candidates: Array<{ num: number; pageIndex: number }> = [];
     for (const [num, pageNo] of tocMap) {
-      unitStarts.push({ num, pageIndex: locateStartPage(pages, pattern, num, pageNo) });
+      candidates.push({ num, pageIndex: locateStartPage(pages, pattern, num, pageNo) });
+    }
+    // 同一页被多个单元占用 → 用「页内实际出现的单元号」裁决，留下正确的那个
+    const byPage = new Map<number, Array<{ num: number; pageIndex: number }>>();
+    for (const c of candidates) {
+      const arr = byPage.get(c.pageIndex) ?? [];
+      arr.push(c);
+      byPage.set(c.pageIndex, arr);
+    }
+    const resolved: Array<{ num: number; pageIndex: number }> = [];
+    for (const [pageIndex, list] of byPage) {
+      if (list.length === 1) {
+        resolved.push(list[0]);
+        continue;
+      }
+      const pageText = pages[pageIndex]?.text ?? '';
+      const confirmed = list.filter(c => pageContainsUnitNumber(pageText, pattern, c.num));
+      if (confirmed.length === 1) resolved.push(confirmed[0]);
+      else if (confirmed.length > 1) resolved.push(confirmed.sort((a, b) => a.num - b.num)[0]);
+      else resolved.push(list[0]);
+    }
+    unitStarts = resolved;
+    // 补齐目录中缺失的单元（如撞页被裁掉的那一个）：按「N Unité / Unité N」全篇找开篇页
+    const present = new Set(unitStarts.map(u => u.num));
+    const maxNum = tocMap.size > 0 ? Math.max(...Array.from(tocMap.keys())) : 0;
+    for (let num = 1; num <= maxNum; num += 1) {
+      if (present.has(num)) continue;
+      const idx = findPageWithUnitNumber(pages, pattern, num);
+      if (idx >= 0) {
+        unitStarts.push({ num, pageIndex: idx });
+        present.add(num);
+      }
     }
   } else {
     // ② 页首标记检测（跳过目录页）
