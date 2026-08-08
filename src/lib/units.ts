@@ -118,11 +118,15 @@ export function extractTocMap(pages: Array<{ n: number; text: string }>, pattern
   return map;
 }
 
-/** 从目录条目文本里提取单元主题（如 "Unité 1 p. 13 Nouvelles vies" → "Nouvelles vies"） */
+/** 目录主题之后的「技能列表/章节关键字」：主题提取到此为止 */
+const THEME_STOP = /(•|｜|。|·|Compréhension orale|Compréhension écrite|Production orale|Production écrite|Grammaire|Vocabulaire|Lexique|Phonétique|Objectifs|Échauffement|Comprendre|Découvrir|Atelier|Stratégies|DELF)/i;
+
+/** 从目录条目文本里提取单元主题（如 "Unité 1 p. 13 Nouvelles vies" → "Nouvelles vies"；
+ *  B2 目录为 "Unité 1 p. 11 Se mettre au vert Compréhension orale …" → "Se mettre au vert"） */
 function tocTheme(pageText: string, afterIndex: number, pattern: UnitPattern): string {
   const rest = pageText.slice(afterIndex).trim();
   if (!rest) return '';
-  const stop = rest.search(/[•｜|。·]/);
+  const stop = rest.search(THEME_STOP);
   let candidate = stop >= 0 ? rest.slice(0, stop) : rest;
   candidate = candidate.replace(/\s{2,}/g, ' ').trim();
   // 去掉开头的中缀（如 "Nouvelles vies" 前可能残留小标题）
@@ -133,7 +137,9 @@ function tocTheme(pageText: string, afterIndex: number, pattern: UnitPattern): s
 /** 从单元开篇页提取主题（无目录时的兜底） */
 function openerTheme(pageText: string, pattern: UnitPattern): string {
   let t = pageText.trim();
-  t = t.replace(new RegExp('^' + escapeRegExp(pattern.label) + String.raw`\s*\d{0,2}\s*`, 'i'), '');
+  const label = escapeRegExp(pattern.label);
+  // B2 风格：开篇页以 "数字 Unité" 开头；A2 风格：以 "Unité" 开头（可能带数字）
+  t = t.replace(new RegExp('^(?:\\d{1,2}\\s+)?' + label + String.raw`\s*\d{0,2}\s*`, 'i'), '');
   const objIdx = t.search(/Objectifs|objectifs|Contenus|contenus|Au programme/i);
   if (objIdx > 0) t = t.slice(0, objIdx);
   t = t.replace(/\s*\d{1,2}\s*$/, '').replace(/\s{2,}/g, ' ').trim();
@@ -142,26 +148,36 @@ function openerTheme(pageText: string, pattern: UnitPattern): string {
 
 /** 全篇查找第一个以「标记 + 数字」开头的页（越界/无目录时的兜底） */
 function findFirstStart(pages: Array<{ n: number; text: string }>, pattern: UnitPattern, num: number): number {
-  const numStart = new RegExp('^' + escapeRegExp(pattern.label) + String.raw`\s*` + num + String.raw`\b`, 'i');
+  const label = escapeRegExp(pattern.label);
+  const numStart = new RegExp('^' + label + String.raw`\s*` + num + String.raw`\b`, 'i');
+  const numFirst = new RegExp('^\s*' + num + String.raw`\s+` + label + String.raw`\b`, 'i');
   for (let i = 0; i < pages.length; i += 1) {
-    if (numStart.test(pages[i].text)) return i;
+    if (numStart.test(pages[i].text) || numFirst.test(pages[i].text)) return i;
   }
   return 0;
 }
 
+/** 页面是否像「单元开篇页」：以 Unité（带/不带数字）或「数字 Unité」开头，或开头 200 字符内含 Objectifs 等开篇标记 */
+function looksLikeOpener(pageText: string, pattern: UnitPattern): boolean {
+  const label = escapeRegExp(pattern.label);
+  if (new RegExp('^' + label + String.raw`[\s\d]*`, 'i').test(pageText)) return true; // Unité 1 … / Unité Faites…
+  if (new RegExp('^\s*\d{1,2}\s+' + label + String.raw`\b`, 'i').test(pageText)) return true; // 1 Unité …
+  if (/\b(Objectifs|Au programme|Découvrir|Contenus)\b/i.test(pageText.slice(0, 200))) return true;
+  return false;
+}
+
 /** 在提示页码附近寻找真正的单元起始页。
- *  目录给的页码通常就是开篇页：只要该页以标记开头（带或不带数字，如「Unité Faites des expériences…」）就直接采用；
- *  否则在 ±3 页内找以「标记 + 数字」开头的页；仍找不到（或提示页码越界，如目录页码与 PDF 页码偏差较大）则全篇兜底。 */
+ *  目录给的页码通常就是开篇页：只要该页像开篇页（Unité / 数字 Unité / 含 Objectifs）就直接采用；
+ *  否则在 ±3 页内找；仍找不到（或提示页码越界）则全篇兜底。 */
 export function locateStartPage(pages: Array<{ n: number; text: string }>, pattern: UnitPattern, num: number, hintPageNo: number): number {
   const hintIdx = hintPageNo - 1;
-  if (hintIdx < 0 || hintIdx >= pages.length) return findFirstStart(pages, pattern, num);
-  const labelStart = new RegExp('^' + escapeRegExp(pattern.label) + String.raw`[\s\d]*`, 'i');
-  if (labelStart.test(pages[hintIdx].text)) return hintIdx;
-  const numStart = new RegExp('^' + escapeRegExp(pattern.label) + String.raw`\s*` + num + String.raw`\b`, 'i');
-  const from = Math.max(0, hintIdx - 3);
-  const to = Math.min(pages.length - 1, hintIdx + 3);
-  for (let i = from; i <= to; i += 1) {
-    if (numStart.test(pages[i].text)) return i;
+  if (hintIdx >= 0 && hintIdx < pages.length) {
+    if (looksLikeOpener(pages[hintIdx].text, pattern)) return hintIdx;
+    const from = Math.max(0, hintIdx - 3);
+    const to = Math.min(pages.length - 1, hintIdx + 3);
+    for (let i = from; i <= to; i += 1) {
+      if (looksLikeOpener(pages[i].text, pattern)) return i;
+    }
   }
   return findFirstStart(pages, pattern, num);
 }

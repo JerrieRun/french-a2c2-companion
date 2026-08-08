@@ -111,3 +111,42 @@ describe('本地单元拆分', () => {
     expect(p?.key).toBe('unite');
   });
 });
+
+describe('Édito B2 风格', () => {
+  it('目录主题后直接跟技能列表（无圆点）也能提取干净标题', () => {
+    // 目录行：Unité 1 p. 11 Se mettre au vert Compréhension orale Production orale …
+    const pages: string[] = [];
+    // 目录页（2 条/页，模拟多栏）
+    pages.push('Sommaire\nUnité 1 p. 11 Se mettre au vert Compréhension orale Production orale Compréhension écrite\nUnité 2 p. 25 Être ou avoir ? Compréhension orale Production orale');
+    pages.push('Sommaire\nUnité 3 p. 41 Chercher sa voie Compréhension orale Production orale\nUnité 4 p. 55 Les écrans ne montrent pas toujours la réalité. Compréhension orale');
+    // 开篇页：B2 风格「数字 Unité 主题 Objectifs」
+    const startPages = [11, 25, 41, 55];
+    startPages.forEach((start, idx) => {
+      const n = idx + 1;
+      while (pages.length < start) pages.push(`第 ${pages.length + 1} 页 填充内容.`);
+      pages[start - 1] = `${n} Unité Thème ${n} Objectifs o Témoigner.`;
+    });
+    while (pages.length < 70) pages.push(`第 ${pages.length + 1} 页 补充内容.`);
+    const r = buildLocalUnitsFromText(makeText(pages));
+    expect(r.units.length).toBe(4);
+    expect(r.units[0].title).toBe('Unité 1 · Se mettre au vert');
+    expect(r.units[1].title).toBe('Unité 2 · Être ou avoir ?');
+    expect(r.units[0].startPage).toBe(11);
+    expect(r.units[1].startPage).toBe(25);
+    expect(r.units[3].startPage).toBe(55);
+  });
+
+  it('B2 风格开篇页（数字 Unité 主题）能正确定位起始页', () => {
+    // 标准目录（Unité N p. XX）负责识别模式，开篇页是「数字 Unité」格式
+    const pages = [
+      'Sommaire\nUnité 1 p. 2 Un thème • Compréhension orale\nUnité 2 p. 4 Deuxième thème • Compréhension orale',
+      '1 Unité Un thème Objectifs o Parler. Contenu du chapitre un.',
+      'Suite du chapitre un.',
+      '2 Unité Deuxième thème Objectifs o Écouter. Contenu deux.',
+    ];
+    const r = buildLocalUnitsFromText(makeText(pages));
+    expect(r.units.length).toBe(2);
+    expect(r.units[0].startPage).toBe(2);
+    expect(r.units[1].startPage).toBe(4);
+  });
+});
