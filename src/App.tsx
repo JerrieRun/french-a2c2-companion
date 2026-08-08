@@ -13,7 +13,7 @@ import {
 } from './lib/storage';
 import { pdfToMarkdown, extractMarkdownRange } from './lib/pdfToMarkdown';
 import { compressPdf } from './lib/pdfCompress';
-import { buildLocalMaterialPreview, buildLocalUnitsFromText } from './lib/units';
+import { buildLocalMaterialPreview, buildLocalUnitsFromText, LOCAL_PARSE_VERSION } from './lib/units';
 import { extractWordCandidates, getCeFrTag, translateSentence, translateWord } from './lib/words';
 import { buildLocalPractice, detectLevel, normalizePractice } from './lib/unitPractice';
 import type { AnalysisRecord, AnalysisResult, FlashcardSrs, GrammarExercise, IntensiveAnalysis, MaterialPreview, PathProgress, TabKey, TextbookMeta, UnitSection, WordCandidate, WordLookupResult } from './types';
@@ -458,8 +458,11 @@ function App() {
     let preview = await loadTextbookPreviewFor(id);
     // 自愈：历史上「上传新教材时预览写入旧教材槽位」的竞态可能让预览与本书不匹配。
     // 若预览文件名与本书不一致，或本书有 PDF 却没有预览，则用本书 PDF 重建解析结果。
-    if (preview && book.name && preview.title && preview.title !== book.name) {
-      console.warn(`教材《${book.name}》的解析结果与文件名不匹配（${preview.title}），重建中…`);
+    if (
+      preview &&
+      ((book.name && preview.title && preview.title !== book.name) || (book.parseVersion ?? 0) < LOCAL_PARSE_VERSION)
+    ) {
+      console.warn(`教材《${book.name}》的解析结果过期或与文件名不匹配（${preview.title}，v${book.parseVersion ?? 0}），重建中…`);
       preview = null;
     }
     if (!preview && pdf) {
@@ -476,6 +479,7 @@ function App() {
           unitCount: fullPreview.units.length,
           pages: fullPreview.pages,
           sentenceCount: fullPreview.sentences.length,
+          parseVersion: LOCAL_PARSE_VERSION,
         });
       } catch (e) {
         console.warn('重建教材解析结果失败：', e);
@@ -638,6 +642,7 @@ function App() {
       hasPdf: false,
       hasMd: true,
       hasPreview: false,
+      parseVersion: LOCAL_PARSE_VERSION,
     };
     try {
       await saveTextbookMarkdownFor(bid, trimmed);
@@ -754,6 +759,7 @@ function App() {
           hasPdf: true,
           hasMd: false,
           hasPreview: true,
+          parseVersion: LOCAL_PARSE_VERSION,
         };
         const lib = [...loadTextbookLibrary().filter(b => b.id !== bookId), meta];
         saveTextbookLibrary(lib);

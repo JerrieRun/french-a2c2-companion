@@ -210,4 +210,6 @@ export type TextbookMeta = {
   hasPdf: boolean;
   hasMd: boolean;
   hasPreview: boolean;
+  /** 本地解析器版本：升级解析逻辑后，旧版本教材会自动重建解析结果 */
+  parseVersion?: number;
 };

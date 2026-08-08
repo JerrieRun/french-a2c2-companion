@@ -15,6 +15,9 @@
 import type { MaterialPreview, UnitSection, WordCandidate } from '../types';
 import { extractWordCandidates } from './words';
 
+/** 本地单元解析器版本：解析逻辑升级后递增，用于让旧教材自动重建解析结果 */
+export const LOCAL_PARSE_VERSION = 2;
+
 export type LocalParseResult = {
   units: UnitSection[];
   pages: number;
