@@ -175,6 +175,7 @@ export function MarkdownReader(props: MarkdownReaderProps) {
   const [selectedUnitIndex, setSelectedUnitIndex] = useState<number | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
   const importRef = useRef<HTMLInputElement>(null);
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
@@ -256,18 +257,25 @@ export function MarkdownReader(props: MarkdownReaderProps) {
       (container.contains(range.startContainer) && container.contains(range.endContainer));
     if (!inReader) return;
     const rect = range.getBoundingClientRect();
-    const containerRect = container.getBoundingClientRect();
+    // 弹条渲染在滚动容器外层的 relative 包裹里，按外层盒子定位（不受容器滚动影响）
+    const host = wrapRef.current ?? container;
+    const hostRect = host.getBoundingClientRect();
     setSelection({
       text,
-      x: Math.min(Math.max(rect.left - containerRect.left, 8), Math.max(containerRect.width - 280, 8)),
-      y: Math.max(rect.top - containerRect.top - 48, 8),
+      x: Math.min(Math.max(rect.left - hostRect.left, 8), Math.max(hostRect.width - 280, 8)),
+      y: Math.max(rect.top - hostRect.top - 48, 8),
     });
   };
 
-  // 全局监听选区变化（最稳，覆盖在容器外松开的情况）；容器内松开时再校正一次位置
+  // 全局监听选区变化（最稳，覆盖在容器外松开的情况）；容器内松开时再校正一次位置；滚动时让弹条跟随选区
   useEffect(() => {
     document.addEventListener('selectionchange', syncSelection);
-    return () => document.removeEventListener('selectionchange', syncSelection);
+    const sc = scrollRef.current;
+    sc?.addEventListener('scroll', syncSelection);
+    return () => {
+      document.removeEventListener('selectionchange', syncSelection);
+      sc?.removeEventListener('scroll', syncSelection);
+    };
   }, []);
 
   const handleMouseUp = () => {
@@ -444,9 +452,10 @@ export function MarkdownReader(props: MarkdownReaderProps) {
       </div>
 
       {/* 正文 */}
+      <div ref={wrapRef} className="relative">
       <div
         ref={scrollRef}
-        className="relative max-h-[70vh] overflow-auto rounded-b-[28px] bg-[#fffdf7] p-6"
+        className="max-h-[70vh] overflow-auto rounded-b-[28px] bg-[#fffdf7] p-6"
         onMouseUp={handleMouseUp}
         onClick={handleClick}
       >
@@ -512,6 +521,35 @@ export function MarkdownReader(props: MarkdownReaderProps) {
             </button>
           </div>
         )}
+      </div>
+
+      {selection && (
+        <div
+          className="absolute z-20 flex max-w-[90%] flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 shadow-lg"
+          style={{ left: Math.max(8, selection.x), top: Math.max(8, selection.y) }}
+        >
+          <span className="max-w-[160px] truncate text-xs text-slate-400">“{selection.text.slice(0, 24)}”</span>
+          <button
+            type="button"
+            disabled={actionBusy}
+            onClick={() => void runAction('analyze')}
+            className="rounded-xl bg-lavender/40 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-lavender/70"
+          >
+            🧩 精析
+          </button>
+          <button
+            type="button"
+            disabled={actionBusy}
+            onClick={() => void runAction('add')}
+            className="rounded-xl bg-gradient-to-r from-warm to-coral px-3 py-1.5 text-xs font-semibold text-white hover:opacity-90"
+          >
+            ➕ 生词
+          </button>
+          <button type="button" onClick={clearSelection} className="rounded-xl px-2 py-1.5 text-xs font-semibold text-slate-400 hover:bg-slate-100">
+            ✕
+          </button>
+        </div>
+      )}
       </div>
     </div>
   );
